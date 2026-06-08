@@ -22,12 +22,12 @@
         "properties": {
             "oracleCacheUp.user": {
                 "type": "string",
-                "default": "PSNAVIGATOR",
+                "default": "",
                 "description": "Oracle database username"
             },
             "oracleCacheUp.connectString": {
                 "type": "string",
-                "default": "10.18.1.48:1521/PSPRODDB",
+                "default": "",
                 "description": "Oracle Easy Connect string, e.g. host:1521/service"
             },
             "oracleCacheUp.owner": {
