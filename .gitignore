@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# VS Code extension build output
+out/
+
+# Dependencies
+node_modules/
+
+# VS Code extension test files
+.vscode-test/
+
+# Generated cache data
+cache/metadata.json
+
+# Packaged extension files
+*.vsix
+.vscode-test.mjs
+src/test/extension.test.ts
+vsc-extension-quickstart.md

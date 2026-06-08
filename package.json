@@ -1,0 +1,80 @@
+{
+  "name": "oracle-cache-up",
+  "displayName": "OracleCacheUp",
+  "description": "Cache Oracle definitions to recreate object hovers",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.120.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:sql",
+    "onLanguage:plsql",
+    "onLanguage:oracle-sql",
+    "onLanguage:oracle-plsql"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+        "title": "OracleCacheUp",
+        "properties": {
+            "oracleCacheUp.user": {
+                "type": "string",
+                "default": "PSNAVIGATOR",
+                "description": "Oracle database username"
+            },
+            "oracleCacheUp.connectString": {
+                "type": "string",
+                "default": "10.18.1.48:1521/PSPRODDB",
+                "description": "Oracle Easy Connect string, e.g. host:1521/service"
+            },
+            "oracleCacheUp.owner": {
+                "type": "string",
+                "default": "PS",
+                "description": "Oracle schema owner to cache"
+            }
+        }
+    },
+    "commands": [
+      {
+        "command": "oracle-cache-up.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "oracle-cache-up.refreshCache",
+        "title": "OracleCacheUp: Refresh Cache"
+      },
+      {
+          "command": "oracle-cache-up.testConnection",
+          "title": "OracleCacheUp: Test Connection"
+      },
+      {
+          "command": "oracle-cache-up.setPassword",
+          "title": "OracleCacheUp: Set Password"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.120.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.39.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
+  },
+  "dependencies": {
+    "oracledb": "^7.0.0"
+  }
+}
