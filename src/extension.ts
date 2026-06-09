@@ -1,5 +1,3 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -11,10 +9,15 @@ interface OracleConnection {
 	host: string;
 	port: number;
 	serviceName: string;
-	owner: string;
+	sid: string;
+	owner?: string;
+	database: string;
+	connectionType: 'serviceName' | 'sid';
+	metadataMode: 'generic' | 'powerschool';
 }
 
 let cache: any = {};
+let hoverPaused = false;
 
 function loadCache() {
 	const cachePath = path.join(__dirname, '../cache/metadata.json');
@@ -34,12 +37,7 @@ function loadCache() {
 	cache = JSON.parse(raw);
 }
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-
-	// console.log('OracleCacheUp active');
-	vscode.window.showInformationMessage('OracleCacheUp activated');
 	loadCache();
 
 	const addConnection = vscode.commands.registerCommand(
@@ -150,48 +148,20 @@ export function activate(context: vscode.ExtensionContext) {
 					connectString
 				});
 
+				const config = vscode.workspace.getConfiguration('oracleCacheUp');
+				const metadataMode = config.get<string>('metadataMode') ?? 'generic';
+
+				const metadataQuery = activeConnection.metadataMode === 'powerschool'
+						? getPowerSchoolMetadataQuery()
+						: getGenericOracleMetadataQuery();
+
 				const result = await connection.execute(
-					`
-						SELECT
-							JSON_ARRAYAGG(
-								JSON_OBJECT(
-									'table_name' VALUE atc.table_name,
-									'field_name' VALUE atc.column_name,
-									'field_version' VALUE COALESCE(pb_dict.field_version, cust_dict.field_version, '1.0'),
-									'field_data_type' VALUE atc.data_type || chr(40) || atc.data_length || chr(41)
-									RETURNING CLOB
-								)
-								RETURNING CLOB
-							) AS CACHE_JSON
-						FROM (
-							SELECT table_name, column_name, data_type, data_length
-							FROM all_tab_columns
-							WHERE owner = :owner
-						) atc
-						LEFT JOIN (
-							SELECT 
-								UPPER(dictionaryobject.objectname) AS table_name_uc,
-								UPPER(dictionarycolumn.columnname) AS column_name_uc,
-								dictionarycolumn.columnversion AS field_version
-							FROM dictionarycolumn
-							INNER JOIN dictionaryobject 
-								ON dictionaryobject.objectname = dictionarycolumn.tablename
-						) pb_dict
-							ON pb_dict.table_name_uc = atc.table_name
-							AND pb_dict.column_name_uc = atc.column_name
-						LEFT JOIN (
-							SELECT 
-								UPPER(extschemadeftable.dbtablename) AS table_name_uc,
-								UPPER(extschemadeffield.name) AS column_name_uc,
-								'1.0.0' AS field_version
-							FROM extschemadeftable
-							INNER JOIN extschemadeffield 
-								ON extschemadeffield.extschematable_id = extschemadeftable.id
-						) cust_dict
-							ON cust_dict.table_name_uc = atc.table_name
-							AND cust_dict.column_name_uc = atc.column_name
-					`,
-					{ owner: owner.toUpperCase() },
+					metadataQuery,
+					{
+						owner: owner?.trim()
+							? owner.trim().toUpperCase()
+							: null
+					},
 					{
 						fetchInfo: {
 							CACHE_JSON: {
@@ -216,7 +186,6 @@ export function activate(context: vscode.ExtensionContext) {
 					}
 
 					newCache[tableName][fieldName] = {
-						field_version: row.field_version,
 						field_data_type: row.field_data_type
 					};
 				}
@@ -300,6 +269,10 @@ export function activate(context: vscode.ExtensionContext) {
 		['sql', 'plsql', 'oracle-sql', 'oracle-plsql'],
 		{
 			provideHover(document, position) {
+				if (hoverPaused) {
+					return;
+				}
+
 				const wordRange = document.getWordRangeAtPosition(
 					position,
 					/[a-zA-Z0-9_$#]+/
@@ -377,6 +350,32 @@ export function activate(context: vscode.ExtensionContext) {
 			panel.webview.html = getConnectionManagerHtml(connections, activeConnectionName, passwordStatuses);
 
 			panel.webview.onDidReceiveMessage(async message => {
+				if (message.command === 'makeActive') {
+					const connection = message.connection as OracleConnection;
+
+					if (!connection?.name) {
+						vscode.window.showErrorMessage('Choose a connection before connecting.');
+						return;
+					}
+
+					const config = vscode.workspace.getConfiguration('oracleCacheUp');
+
+					await config.update(
+						'activeConnection',
+						connection.name,
+						vscode.ConfigurationTarget.Global
+					);
+
+					const connections = config.get<OracleConnection[]>('connections') ?? [];
+
+					panel.webview.html = getConnectionManagerHtml(
+						connections,
+						connection.name,
+						await getPasswordStatuses(context, connections)
+					);
+
+					vscode.window.showInformationMessage(`Active connection set to "${connection.name}".`);
+				}
 				if (message.command === 'setPassword') {
 					const connectionName = message.connectionName as string;
 
@@ -553,11 +552,40 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 
+	const pauseHoverCommand = vscode.commands.registerCommand(
+		'oracle-cache-up.pauseHover',
+		() => {
+			hoverPaused = true;
+			vscode.window.showInformationMessage('OracleCacheUp hovers paused.');
+		}
+	);
+
+	const resumeHoverCommand = vscode.commands.registerCommand(
+		'oracle-cache-up.resumeHover',
+		() => {
+			hoverPaused = false;
+			vscode.window.showInformationMessage('OracleCacheUp hovers resumed.');
+		}
+	);
+
+	const restartHoverCommand = vscode.commands.registerCommand(
+		'oracle-cache-up.restartHover',
+		() => {
+			hoverPaused = false;
+			loadCache();
+			vscode.window.showInformationMessage('OracleCacheUp hovers restarted.');
+		}
+	);
+
 	context.subscriptions.push(addConnection);
 	context.subscriptions.push(hoverProvider);
 	context.subscriptions.push(testConnectionCommand);
 	context.subscriptions.push(refreshCacheCommand);
 	context.subscriptions.push(manageConnectionsCommand);
+
+	context.subscriptions.push(pauseHoverCommand);
+	context.subscriptions.push(resumeHoverCommand);
+	context.subscriptions.push(restartHoverCommand);
 }
 
 async function getPasswordStatuses(
@@ -576,43 +604,39 @@ async function getPasswordStatuses(
 }
 
 function showTableHover(tableName: string, cache: any): vscode.Hover | undefined {
-	const table = cache[tableName];
+    const table = cache[tableName];
 
-	if (!table) {
-		return new vscode.Hover(`Table/Object: ${tableName}\n\nNo cached metadata found.`);
-	}
+    if (!table) {
+        return new vscode.Hover(`Table/Object: ${tableName}\n\nNo cached metadata found.`);
+    }
 
-	const md = new vscode.MarkdownString();
-	md.appendMarkdown(`### ${tableName}\n\n`);
-	md.appendMarkdown(`| Field | Type | Version |\n`);
-	md.appendMarkdown(`|---|---|---|\n`);
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`### ${tableName}\n\n`);
+    md.appendMarkdown(`| Field | Type |\n`);
+    md.appendMarkdown(`|---|---|\n`);
 
-	for (const [fieldName, fieldInfo] of Object.entries(table)) {
-		const info = fieldInfo as any;
+    for (const [fieldName, fieldInfo] of Object.entries(table)) {
+        const info = fieldInfo as any;
+        md.appendMarkdown(`| ${fieldName} | ${info.field_data_type ?? ''} |\n`);
+    }
 
-		md.appendMarkdown(
-			`| ${fieldName} | ${info.field_data_type ?? ''} | ${info.field_version ?? ''} |\n`
-		);
-	}
-
-	return new vscode.Hover(md);
+    return new vscode.Hover(md);
 }
 
 function showFieldHover(tableName: string, fieldName: string, cache: any): vscode.Hover | undefined {
-	const fieldInfo = cache?.[tableName]?.[fieldName];
+    const fieldInfo = cache?.[tableName]?.[fieldName];
 
-	if (!fieldInfo) {
-		return new vscode.Hover(
-			`Field: ${tableName}.${fieldName}\n\nNo cached metadata found.`
-		);
-	}
+    if (!fieldInfo) {
+        return new vscode.Hover(
+            `Field: ${tableName}.${fieldName}\n\nNo cached metadata found.`
+        );
+    }
 
-	const md = new vscode.MarkdownString();
-	md.appendMarkdown(`### ${tableName}.${fieldName}\n\n`);
-	md.appendMarkdown(`**Type:** ${fieldInfo.field_data_type ?? ''}  \n`);
-	md.appendMarkdown(`**Version:** ${fieldInfo.field_version ?? ''}`);
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`### ${tableName}.${fieldName}\n\n`);
+    md.appendMarkdown(`**Type:** ${fieldInfo.field_data_type ?? ''}`);
 
-	return new vscode.Hover(md);
+    return new vscode.Hover(md);
 }
 
 function showGlobalFieldHover(fieldName: string, cache: any): vscode.Hover | undefined {
@@ -625,7 +649,7 @@ function showGlobalFieldHover(fieldName: string, cache: any): vscode.Hover | und
 			const fieldInfo = tableFields[fieldName];
 
 			matches.push(
-				`| ${tableName}.${fieldName} | ${fieldInfo.field_data_type ?? ''} | ${fieldInfo.field_version ?? ''} |`
+				`| ${tableName}.${fieldName} | ${fieldInfo.field_data_type ?? ''} |`
 			);
 		}
 	}
@@ -636,8 +660,8 @@ function showGlobalFieldHover(fieldName: string, cache: any): vscode.Hover | und
 
 	const md = new vscode.MarkdownString();
 	md.appendMarkdown(`### ${fieldName}\n\n`);
-	md.appendMarkdown(`| Field | Type | Version |\n`);
-	md.appendMarkdown(`|---|---|---|\n`);
+	md.appendMarkdown(`| Field | Type |\n`);
+	md.appendMarkdown(`|---|---|\n`);
 	md.appendMarkdown(matches.join('\n'));
 
 	return new vscode.Hover(md);
@@ -687,6 +711,10 @@ function getAliases(statementSql: string): Record<string, string> {
 }
 
 function buildConnectString(connection: OracleConnection): string {
+    if (connection.connectionType === 'sid') {
+        return `(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=${connection.host})(PORT=${connection.port}))(CONNECT_DATA=(SID=${connection.sid})))`;
+    }
+
     return `${connection.host}:${connection.port}/${connection.serviceName}`;
 }
 
@@ -702,6 +730,84 @@ function getActiveConnection(): OracleConnection | undefined {
 	return connections.find(
 		c => c.name === activeConnectionName
 	);
+}
+
+function getGenericOracleMetadataQuery(): string {
+    return `
+        SELECT
+            JSON_ARRAYAGG(
+                JSON_OBJECT(
+                    'table_name' VALUE atc.table_name,
+                    'field_name' VALUE atc.column_name,
+                    'field_data_type' VALUE
+                        CASE
+                            WHEN atc.data_type IN ('VARCHAR2', 'CHAR', 'NVARCHAR2', 'NCHAR')
+                                THEN atc.data_type || '(' || atc.char_length || ')'
+                            WHEN atc.data_type = 'NUMBER' AND atc.data_precision IS NOT NULL AND atc.data_scale IS NOT NULL
+                                THEN atc.data_type || '(' || atc.data_precision || ',' || atc.data_scale || ')'
+                            WHEN atc.data_type = 'NUMBER' AND atc.data_precision IS NOT NULL
+                                THEN atc.data_type || '(' || atc.data_precision || ')'
+                            ELSE atc.data_type
+                        END
+                    RETURNING CLOB
+                )
+                ORDER BY atc.table_name, atc.column_id
+                RETURNING CLOB
+            ) AS CACHE_JSON
+        FROM all_tab_columns atc
+        LEFT JOIN all_objects ao
+            ON ao.owner = atc.owner
+            AND ao.object_name = atc.table_name
+            AND ao.object_type IN ('TABLE', 'VIEW')
+        LEFT JOIN all_col_comments acc
+            ON acc.owner = atc.owner
+            AND acc.table_name = atc.table_name
+            AND acc.column_name = atc.column_name
+        WHERE (:owner IS NULL OR atc.owner = :owner)
+    `;
+}
+
+function getPowerSchoolMetadataQuery(): string {
+    return `
+			SELECT
+				JSON_ARRAYAGG(
+					JSON_OBJECT(
+						'table_name' VALUE atc.table_name,
+						'field_name' VALUE atc.column_name,
+						'field_version' VALUE COALESCE(pb_dict.field_version, cust_dict.field_version, '1.0'),
+						'field_data_type' VALUE atc.data_type || chr(40) || atc.data_length || chr(41)
+						RETURNING CLOB
+					)
+					RETURNING CLOB
+				) AS CACHE_JSON
+			FROM (
+				SELECT table_name, column_name, data_type, data_length
+				FROM all_tab_columns
+				WHERE (:owner IS NULL OR owner = :owner)
+			) atc
+			LEFT JOIN (
+				SELECT 
+					UPPER(dictionaryobject.objectname) AS table_name_uc,
+					UPPER(dictionarycolumn.columnname) AS column_name_uc,
+					dictionarycolumn.columnversion AS field_version
+				FROM dictionarycolumn
+				INNER JOIN dictionaryobject 
+					ON dictionaryobject.objectname = dictionarycolumn.tablename
+			) pb_dict
+				ON pb_dict.table_name_uc = atc.table_name
+				AND pb_dict.column_name_uc = atc.column_name
+			LEFT JOIN (
+				SELECT 
+					UPPER(extschemadeftable.dbtablename) AS table_name_uc,
+					UPPER(extschemadeffield.name) AS column_name_uc,
+					'1.0.0' AS field_version
+				FROM extschemadeftable
+				INNER JOIN extschemadeffield 
+					ON extschemadeffield.extschematable_id = extschemadeftable.id
+			) cust_dict
+				ON cust_dict.table_name_uc = atc.table_name
+				AND cust_dict.column_name_uc = atc.column_name
+		`;
 }
 
 function getConnectionManagerHtml(
@@ -725,10 +831,25 @@ function getConnectionManagerHtml(
 			padding: 16px;
 		}
 
+		.hidden {
+			display: none;
+		}
+
+		.placeholder {
+			color: var(--vscode-descriptionForeground);
+			padding: 16px;
+			border: 1px dashed var(--vscode-panel-border);
+			border-radius: 4px;
+		}
+
 		.layout {
 			display: grid;
 			grid-template-columns: 260px 1fr;
 			gap: 16px;
+		}
+
+		#connection-form-tile {
+			width: 800px;
 		}
 
 		.connection-list {
@@ -758,7 +879,13 @@ function getConnectionManagerHtml(
 			margin-bottom: 4px;
 		}
 
-		input {
+		.two-column-row {
+			display: grid;
+			grid-template-columns: 180px 1fr;
+			gap: 12px;
+		}
+
+		input, select {
 			width: 100%;
 			box-sizing: border-box;
 			background: var(--vscode-input-background);
@@ -766,6 +893,33 @@ function getConnectionManagerHtml(
 			border: 1px solid var(--vscode-input-border);
 			padding: 6px;
 			border-radius: 2px;
+		}
+
+		.password-row {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+		}
+
+		.button-row {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin-top: 14px;
+		}
+
+		.button-group {
+			display: flex;
+			gap: 6px;
+		}
+
+		button.danger {
+			background: var(--vscode-errorForeground);
+			color: var(--vscode-button-foreground);
+		}
+
+		button.danger:hover {
+			opacity: 0.85;
 		}
 
 		button {
@@ -777,6 +931,10 @@ function getConnectionManagerHtml(
 			margin-top: 14px;
 			cursor: pointer;
 			border-radius: 2px;
+		}
+
+		button#passwordBtn {
+			margin-top: 1px;
 		}
 
 		button:hover {
@@ -799,37 +957,80 @@ function getConnectionManagerHtml(
 
 	<div class="layout">
 		<div>
-			<button id="newBtn">New Connection</button>
+			<h3>Saved Connections</h3>
 			<div id="connectionList" class="connection-list"></div>
+			<button id="newBtn">New Connection</button>
 		</div>
 
-		<div>
+		<div id="connection-form-tile" class="hidden">
+			<h3 id="formTitle">New Connection</h3>
 			<label>Name</label>
 			<input id="name">
 
-			<label>User</label>
-			<input id="user">
-
-			<label>Host</label>
-			<input id="host">
-
-			<label>Port</label>
-			<input id="port" value="1521">
-
-			<label>Service Name</label>
-			<input id="serviceName">
-
-			<label>Schema Owner</label>
-			<input id="owner" value="PS">
-
-			<div>
-				<button id="saveBtn">Save</button>
-				<button id="testBtn" class="secondary">Test</button>
-				<button id="passwordBtn" class="secondary">Set Password</button>
-				<button id="deleteBtn" class="secondary">Delete</button>
+			<label>Metadata Mode</label>
+			<select id="metadataMode">
+				<option value="generic">Generic Oracle</option>
+				<option value="powerschool">PowerSchool</option>
+			</select>
+			<div class="two-column-row">
+				<div>
+					<label>User</label>
+					<input id="user">
+				</div>
+				<div>
+					<label>Password (Passwords are stored separately in VS Code SecretStorage.)</label>
+					<div class="password-row">
+						<button id="passwordBtn" class="secondary">Set Password</button>
+						<span id="passwordStatus">Not saved</span>	
+					</div>
+				</div>
 			</div>
 
-			<p class="small">Passwords are stored separately in VS Code SecretStorage.</p>
+			<div class="two-column-row">
+				<div>
+					<label>Host</label>
+					<input id="host">
+				</div>
+				<div>
+					<label>Port</label>
+					<input id="port" value="1521">
+				</div>
+			</div>
+
+			<div class="two-column-row">
+				<div>
+					<label>Type</label>
+					<select id="connectionType">
+						<option value="serviceName">Service Name</option>
+						<option value="sid">SID</option>
+					</select>
+				</div>
+
+				<div>
+					<label id="databaseLabel">Service Name</label>
+					<input id="databaseValue">
+				</div>
+			</div>
+
+			<label>Schema Owner <span class="small">(optional)</span></label>
+			<input id="owner" value="PS">
+
+			<div class="button-row">
+				<div class="button-group">
+					<button id="cancelBtn" class="secondary">Cancel</button>
+					<button id="testBtn" class="secondary">Test</button>
+				</div>
+
+				<div class="button-group">
+					<button id="deleteBtn" class="danger">Delete</button>
+					<button id="connectBtn" class="secondary">Connect</button>
+					<button id="saveBtn">Save</button>
+				</div>
+			</div>	
+		</div>
+
+		<div id="form-placeholder" class="placeholder">
+			Select an existing connection or click New Connection.
 		</div>
 	</div>
 
@@ -838,8 +1039,18 @@ function getConnectionManagerHtml(
 
 		let connections = ${connectionJson};
 		let activeConnectionName = ${activeJson};
-		let selectedName = activeConnectionName || "";
+		let selectedName = "";
 		let passwordStatuses = ${passwordStatusJson};
+
+		function showForm() {
+			document.getElementById('connection-form-tile').classList.remove('hidden');
+			document.getElementById('form-placeholder').classList.add('hidden');
+		}
+
+		function hideForm() {
+			document.getElementById('connection-form-tile').classList.add('hidden');
+			document.getElementById('form-placeholder').classList.remove('hidden');
+		}
 
 		function renderList() {
 			const list = document.getElementById('connectionList');
@@ -855,10 +1066,37 @@ function getConnectionManagerHtml(
 				div.addEventListener('click', () => {
 					selectedName = conn.name;
 					fillForm(conn);
+					showForm();
 					renderList();
 				});
 				list.appendChild(div);
 			});
+		}
+
+		function updateDatabaseLabel() {
+			const type = document.getElementById('connectionType').value;
+			const label = document.getElementById('databaseLabel');
+			const input = document.getElementById('databaseValue');
+
+			if (type === 'sid') {
+				label.textContent = 'SID';
+				input.value = input.dataset.sid || '';
+			}
+			else {
+				label.textContent = 'Service Name';
+				input.value = input.dataset.serviceName || '';
+			}
+		}
+
+		function updateFormTitle(conn) {
+			const title = document.getElementById('formTitle');
+
+			if (conn && conn.name) {
+				title.textContent = 'Update Connection: ' + conn.name;
+			}
+			else {
+				title.textContent = 'New Connection';
+			}
 		}
 
 		function fillForm(conn) {
@@ -866,28 +1104,144 @@ function getConnectionManagerHtml(
 			document.getElementById('user').value = conn?.user || '';
 			document.getElementById('host').value = conn?.host || '';
 			document.getElementById('port').value = conn?.port || 1521;
-			document.getElementById('serviceName').value = conn?.serviceName || '';
-			document.getElementById('owner').value = conn?.owner || 'PS';
+			document.getElementById('owner').value = conn?.owner || '';
+			document.getElementById('metadataMode').value = conn?.metadataMode || 'generic';
+
+			const typeEl = document.getElementById('connectionType');
+			const dbEl = document.getElementById('databaseValue');
+
+			typeEl.value = conn?.connectionType || 'serviceName';
+			dbEl.dataset.serviceName = conn?.serviceName || '';
+			dbEl.dataset.sid = conn?.sid || '';
+
+			updateDatabaseLabel();
+			updateFormTitle(conn);
+
+			const hasPassword = conn?.name && passwordStatuses[conn.name];
+
+			document.getElementById('passwordStatus').textContent =
+				hasPassword ? 'Saved 🔑' : 'Not saved';
 		}
 
 		function readForm() {
+			const type = document.getElementById('connectionType').value;
+			const dbEl = document.getElementById('databaseValue');
+
+			if (type === 'sid') {
+				dbEl.dataset.sid = dbEl.value.trim();
+			}
+			else {
+				dbEl.dataset.serviceName = dbEl.value.trim();
+			}
+
 			return {
 				name: document.getElementById('name').value.trim(),
 				user: document.getElementById('user').value.trim(),
 				host: document.getElementById('host').value.trim(),
 				port: Number(document.getElementById('port').value),
-				serviceName: document.getElementById('serviceName').value.trim(),
-				owner: document.getElementById('owner').value.trim() || 'PS'
+				connectionType: type,
+				serviceName: dbEl.dataset.serviceName || '',
+				sid: dbEl.dataset.sid || '',
+				owner: document.getElementById('owner').value.trim(),
+				metadataMode: document.getElementById('metadataMode').value || 'generic'
 			};
 		}
+
+		function validateForm() {
+			const form = readForm();
+
+			const errors = [];
+
+			if (!form.name) {
+				errors.push('Name');
+			}
+
+			if (!form.user) {
+				errors.push('User');
+			}
+
+			if (!form.host) {
+				errors.push('Host');
+			}
+
+			if (!form.port) {
+				errors.push('Port');
+			}
+
+			if (!form.connectionType) {
+				errors.push('Type');
+			}
+
+			if (
+				form.connectionType === 'serviceName' &&
+				!form.serviceName
+			) {
+				errors.push('Service Name');
+			}
+
+			if (
+				form.connectionType === 'sid' &&
+				!form.sid
+			) {
+				errors.push('SID');
+			}
+
+			if (errors.length > 0) {
+				alert(
+					'Please complete:\\n\\n' +
+					errors.join('\\n')
+				);
+
+				return false;
+			}
+
+			return true;
+		}
+
+		document.getElementById('connectionType').addEventListener('change', () => {
+			const dbEl = document.getElementById('databaseValue');
+			const type = document.getElementById('connectionType').value;
+
+			if (type === 'sid') {
+				dbEl.dataset.serviceName = dbEl.dataset.serviceName || '';
+			}
+			else {
+				dbEl.dataset.sid = dbEl.dataset.sid || '';
+			}
+
+			updateDatabaseLabel();
+		});
+
+		document.getElementById('cancelBtn').addEventListener('click', () => {
+			selectedName = '';
+			fillForm(null);
+			hideForm();
+			renderList();
+		});
+
+		document.getElementById('connectBtn').addEventListener('click', () => {
+			if (!validateForm()) {
+				return;
+			}
+
+			vscode.postMessage({
+				command: 'makeActive',
+				connection: readForm()
+			});
+		});
 
 		document.getElementById('newBtn').addEventListener('click', () => {
 			selectedName = '';
 			fillForm(null);
+			showForm();
 			renderList();
 		});
 
 		document.getElementById('saveBtn').addEventListener('click', () => {
+			if (!validateForm()) {
+				return;
+			}
+
 			vscode.postMessage({
 				command: 'saveConnection',
 				connection: readForm()
@@ -895,6 +1249,10 @@ function getConnectionManagerHtml(
 		});
 
 		document.getElementById('testBtn').addEventListener('click', () => {
+			if (!validateForm()) {
+				return;
+			}
+
 			vscode.postMessage({
 				command: 'testConnection',
 				connection: readForm()
@@ -902,9 +1260,16 @@ function getConnectionManagerHtml(
 		});
 
 		document.getElementById('passwordBtn').addEventListener('click', () => {
+			const name = document.getElementById('name').value.trim();
+
+			if (!name) {
+				alert('Connection name is required before setting a password.');
+				return;
+			}
+
 			vscode.postMessage({
 				command: 'setPassword',
-				connectionName: document.getElementById('name').value.trim()
+				connectionName: name
 			});
 		});
 
@@ -915,11 +1280,7 @@ function getConnectionManagerHtml(
 			});
 		});
 
-		const initial = connections.find(c => c.name === selectedName) || connections[0];
-		if (initial) {
-			selectedName = initial.name;
-			fillForm(initial);
-		}
+		hideForm();
 
 		renderList();
 	</script>
