@@ -5,6 +5,15 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as oracledb from 'oracledb';
 
+interface OracleConnection {
+	name: string;
+	user: string;
+	host: string;
+	port: number;
+	serviceName: string;
+	owner: string;
+}
+
 let cache: any = {};
 
 function loadCache() {
@@ -33,6 +42,80 @@ export function activate(context: vscode.ExtensionContext) {
 	vscode.window.showInformationMessage('OracleCacheUp activated');
 	loadCache();
 
+	const addConnection = vscode.commands.registerCommand(
+		'oracle-cache-up.addConnection',
+		async () => {
+
+			const name = await vscode.window.showInputBox({
+				prompt: 'Connection name'
+			});
+
+			if (!name) { return; }
+
+			const user = await vscode.window.showInputBox({
+				prompt: 'Oracle username'
+			});
+
+			if (!user) { return; }
+
+			const host = await vscode.window.showInputBox({
+				prompt: 'Host name or IP'
+			});
+
+			if (!host) { return; }
+
+			const portText = await vscode.window.showInputBox({
+				prompt: 'Port',
+				value: '1521'
+			});
+
+			if (!portText) { return; }
+
+			const serviceName = await vscode.window.showInputBox({
+				prompt: 'Service name'
+			});
+
+			if (!serviceName) { return; }
+
+			const owner = await vscode.window.showInputBox({
+				prompt: 'Schema owner to cache',
+				value: 'PS'
+			});
+
+			if (!owner) { return; }
+
+			const config = vscode.workspace.getConfiguration('oracleCacheUp');
+
+			const connections =
+				config.get<any[]>('connections') ?? [];
+
+			connections.push({
+				name,
+				user,
+				host,
+				port: Number(portText),
+				serviceName,
+				owner
+			});
+
+			await config.update(
+				'connections',
+				connections,
+				vscode.ConfigurationTarget.Global
+			);
+
+			await config.update(
+				'activeConnection',
+				name,
+				vscode.ConfigurationTarget.Global
+			);
+
+			vscode.window.showInformationMessage(
+				`Connection "${name}" added.`
+			);
+		}
+	);
+
 	const refreshCacheCommand = vscode.commands.registerCommand(
 		'oracle-cache-up.refreshCache',
 		async () => {
@@ -40,12 +123,19 @@ export function activate(context: vscode.ExtensionContext) {
 			
 
 			try {
-				const config = vscode.workspace.getConfiguration('oracleCacheUp');
+				const activeConnection = getActiveConnection();
 
-				const user = config.get<string>('user');
-				const connectString = config.get<string>('connectString');
-				const owner = config.get<string>('owner') ?? 'PS';
-				const password = await context.secrets.get('oracleCacheUp.password');
+				if (!activeConnection) {
+					vscode.window.showErrorMessage(
+						'No active OracleCacheUp connection configured.'
+					);
+					return;
+				}
+
+				const user = activeConnection.user;
+				const owner = activeConnection.owner;
+				const connectString = buildConnectString(activeConnection);
+				const password = await context.secrets.get(`oracleCacheUp.password.${activeConnection.name}`);
 
 				if (!user || !connectString || !password) {
 					vscode.window.showErrorMessage(
@@ -161,13 +251,19 @@ export function activate(context: vscode.ExtensionContext) {
 		async () => {
 			let connection: oracledb.Connection | undefined;
 			try {
+				const activeConnection = getActiveConnection();
 
-				const config = vscode.workspace.getConfiguration('oracleCacheUp');
+				if (!activeConnection) {
+					vscode.window.showErrorMessage(
+						'No active OracleCacheUp connection configured.'
+					);
+					return;
+				}
 
-				const user = config.get<string>('user');
-				const connectString = config.get<string>('connectString');
-				const owner = config.get<string>('owner') ?? 'PS';
-				const password = await context.secrets.get('oracleCacheUp.password');
+				const user = activeConnection.user;
+				const owner = activeConnection.owner;
+				const connectString = buildConnectString(activeConnection);
+				const password = await context.secrets.get(`oracleCacheUp.password.${activeConnection.name}`);
 
 				if (!user || !connectString || !password) {
 					vscode.window.showErrorMessage(
@@ -257,29 +353,226 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 
-	const setPasswordCommand = vscode.commands.registerCommand(
-		'oracle-cache-up.setPassword',
+	const manageConnectionsCommand = vscode.commands.registerCommand(
+		'oracle-cache-up.manageConnections',
 		async () => {
-			const password = await vscode.window.showInputBox({
-				prompt: 'Enter Oracle password',
-				password: true,
-				ignoreFocusOut: true
-			});
+			const panel = vscode.window.createWebviewPanel(
+				'oracleCacheUpConnections',
+				'OracleCacheUp Connections',
+				vscode.ViewColumn.One,
+				{
+					enableScripts: true
+				}
+			);
 
-			if (!password) {
-				return;
+			const config = vscode.workspace.getConfiguration('oracleCacheUp');
+			const connections = config.get<OracleConnection[]>('connections') ?? [];
+			const activeConnectionName = config.get<string>('activeConnection') ?? '';
+			const passwordStatuses: Record<string, boolean> = {};
+
+			for (const conn of connections) {
+				passwordStatuses[conn.name] = !!await context.secrets.get(`oracleCacheUp.password.${conn.name}`);
 			}
 
-			await context.secrets.store('oracleCacheUp.password', password);
+			panel.webview.html = getConnectionManagerHtml(connections, activeConnectionName, passwordStatuses);
 
-			vscode.window.showInformationMessage('OracleCacheUp password saved.');
+			panel.webview.onDidReceiveMessage(async message => {
+				if (message.command === 'setPassword') {
+					const connectionName = message.connectionName as string;
+
+					if (!connectionName) {
+						vscode.window.showErrorMessage('Enter a connection name before setting a password.');
+						return;
+					}
+
+					const password = await vscode.window.showInputBox({
+						prompt: `Enter password for ${connectionName}`,
+						password: true,
+						ignoreFocusOut: true
+					});
+
+					if (!password) {
+						return;
+					}
+
+					await context.secrets.store(
+						`oracleCacheUp.password.${connectionName}`,
+						password
+					);
+
+					const config = vscode.workspace.getConfiguration('oracleCacheUp');
+					const connections = config.get<OracleConnection[]>('connections') ?? [];
+					const activeConnectionName = config.get<string>('activeConnection') ?? '';
+
+					panel.webview.html = getConnectionManagerHtml(
+						connections,
+						activeConnectionName,
+						await getPasswordStatuses(context, connections)
+					);
+
+					vscode.window.showInformationMessage(`Password saved for "${connectionName}".`);
+				}
+
+				if (message.command === 'testConnection') {
+					const testConnection = message.connection as OracleConnection;
+
+					if (!testConnection?.name) {
+						vscode.window.showErrorMessage('Enter a connection name before testing.');
+						return;
+					}
+
+					const password = await context.secrets.get(
+						`oracleCacheUp.password.${testConnection.name}`
+					);
+
+					if (!password) {
+						vscode.window.showErrorMessage(`No password saved for "${testConnection.name}".`);
+						return;
+					}
+
+					let connection: oracledb.Connection | undefined;
+
+					try {
+						connection = await oracledb.getConnection({
+							user: testConnection.user,
+							password,
+							connectString: buildConnectString(testConnection)
+						});
+
+						const result = await connection.execute('select sysdate from dual');
+
+						vscode.window.showInformationMessage(
+							`Connection successful: ${JSON.stringify(result.rows)}`
+						);
+					}
+					catch (err: any) {
+						vscode.window.showErrorMessage(`Connection failed: ${err.message}`);
+					}
+					finally {
+						if (connection) {
+							await connection.close();
+						}
+					}
+				}
+
+				if (message.command === 'deleteConnection') {
+					const connectionName = message.connectionName as string;
+
+					if (!connectionName) {
+						vscode.window.showErrorMessage('No connection selected.');
+						return;
+					}
+
+					const confirm = await vscode.window.showWarningMessage(
+						`Delete connection "${connectionName}"?`,
+						{ modal: true },
+						'Delete'
+					);
+
+					if (confirm !== 'Delete') {
+						return;
+					}
+
+					const config = vscode.workspace.getConfiguration('oracleCacheUp');
+					const connections = config.get<OracleConnection[]>('connections') ?? [];
+
+					const updatedConnections = connections.filter(
+						c => c.name !== connectionName
+					);
+
+					await config.update(
+						'connections',
+						updatedConnections,
+						vscode.ConfigurationTarget.Global
+					);
+
+					await context.secrets.delete(
+						`oracleCacheUp.password.${connectionName}`
+					);
+
+					const activeConnectionName = config.get<string>('activeConnection') ?? '';
+
+					const newActiveConnectionName =
+						activeConnectionName === connectionName
+							? updatedConnections[0]?.name ?? ''
+							: activeConnectionName;
+
+					await config.update(
+						'activeConnection',
+						newActiveConnectionName,
+						vscode.ConfigurationTarget.Global
+					);
+
+					panel.webview.html = getConnectionManagerHtml(
+						updatedConnections,
+						newActiveConnectionName,
+						await getPasswordStatuses(context, updatedConnections)
+					);
+
+					vscode.window.showInformationMessage(`Connection "${connectionName}" deleted.`);
+				}
+
+				if (message.command === 'saveConnection') {
+					const config = vscode.workspace.getConfiguration('oracleCacheUp');
+					const connections = config.get<OracleConnection[]>('connections') ?? [];
+
+					const savedConnection = message.connection as OracleConnection;
+
+					const existingIndex = connections.findIndex(
+						c => c.name === savedConnection.name
+					);
+
+					if (existingIndex >= 0) {
+						connections[existingIndex] = savedConnection;
+					}
+					else {
+						connections.push(savedConnection);
+					}
+
+					await config.update(
+						'connections',
+						connections,
+						vscode.ConfigurationTarget.Global
+					);
+
+					await config.update(
+						'activeConnection',
+						savedConnection.name,
+						vscode.ConfigurationTarget.Global
+					);
+
+					panel.webview.html = getConnectionManagerHtml(
+						connections,
+						savedConnection.name,
+						await getPasswordStatuses(context, connections)
+					);
+
+					vscode.window.showInformationMessage('Connection saved.');
+				}
+			});
 		}
 	);
 
+	context.subscriptions.push(addConnection);
 	context.subscriptions.push(hoverProvider);
 	context.subscriptions.push(testConnectionCommand);
 	context.subscriptions.push(refreshCacheCommand);
-	context.subscriptions.push(setPasswordCommand);
+	context.subscriptions.push(manageConnectionsCommand);
+}
+
+async function getPasswordStatuses(
+    context: vscode.ExtensionContext,
+    connections: OracleConnection[]
+): Promise<Record<string, boolean>> {
+    const statuses: Record<string, boolean> = {};
+
+    for (const conn of connections) {
+        statuses[conn.name] = !!await context.secrets.get(
+            `oracleCacheUp.password.${conn.name}`
+        );
+    }
+
+    return statuses;
 }
 
 function showTableHover(tableName: string, cache: any): vscode.Hover | undefined {
@@ -391,6 +684,248 @@ function getAliases(statementSql: string): Record<string, string> {
 	}
 
 	return aliases;
+}
+
+function buildConnectString(connection: OracleConnection): string {
+    return `${connection.host}:${connection.port}/${connection.serviceName}`;
+}
+
+function getActiveConnection(): OracleConnection | undefined {
+	const config = vscode.workspace.getConfiguration('oracleCacheUp');
+
+	const activeConnectionName =
+		config.get<string>('activeConnection');
+
+	const connections =
+		config.get<OracleConnection[]>('connections') ?? [];
+
+	return connections.find(
+		c => c.name === activeConnectionName
+	);
+}
+
+function getConnectionManagerHtml(
+    connections: OracleConnection[],
+    activeConnectionName: string,
+    passwordStatuses: Record<string, boolean> = {}
+): string {
+	const connectionJson = JSON.stringify(connections);
+	const activeJson = JSON.stringify(activeConnectionName);
+	const passwordStatusJson = JSON.stringify(passwordStatuses);
+
+	return `
+<!DOCTYPE html>
+<html>
+<head>
+	<style>
+		body {
+			font-family: var(--vscode-font-family);
+			color: var(--vscode-foreground);
+			background: var(--vscode-editor-background);
+			padding: 16px;
+		}
+
+		.layout {
+			display: grid;
+			grid-template-columns: 260px 1fr;
+			gap: 16px;
+		}
+
+		.connection-list {
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 4px;
+			overflow: hidden;
+		}
+
+		.connection-item {
+			padding: 10px;
+			cursor: pointer;
+			border-bottom: 1px solid var(--vscode-panel-border);
+		}
+
+		.connection-item:hover {
+			background: var(--vscode-list-hoverBackground);
+		}
+
+		.connection-item.active {
+			background: var(--vscode-list-activeSelectionBackground);
+			color: var(--vscode-list-activeSelectionForeground);
+		}
+
+		label {
+			display: block;
+			margin-top: 10px;
+			margin-bottom: 4px;
+		}
+
+		input {
+			width: 100%;
+			box-sizing: border-box;
+			background: var(--vscode-input-background);
+			color: var(--vscode-input-foreground);
+			border: 1px solid var(--vscode-input-border);
+			padding: 6px;
+			border-radius: 2px;
+		}
+
+		button {
+			background: var(--vscode-button-background);
+			color: var(--vscode-button-foreground);
+			border: none;
+			padding: 6px 10px;
+			margin-right: 6px;
+			margin-top: 14px;
+			cursor: pointer;
+			border-radius: 2px;
+		}
+
+		button:hover {
+			background: var(--vscode-button-hoverBackground);
+		}
+
+		button.secondary {
+			background: var(--vscode-button-secondaryBackground);
+			color: var(--vscode-button-secondaryForeground);
+		}
+
+		.small {
+			color: var(--vscode-descriptionForeground);
+			font-size: 12px;
+		}
+	</style>
+</head>
+<body>
+	<h2>OracleCacheUp Connections</h2>
+
+	<div class="layout">
+		<div>
+			<button id="newBtn">New Connection</button>
+			<div id="connectionList" class="connection-list"></div>
+		</div>
+
+		<div>
+			<label>Name</label>
+			<input id="name">
+
+			<label>User</label>
+			<input id="user">
+
+			<label>Host</label>
+			<input id="host">
+
+			<label>Port</label>
+			<input id="port" value="1521">
+
+			<label>Service Name</label>
+			<input id="serviceName">
+
+			<label>Schema Owner</label>
+			<input id="owner" value="PS">
+
+			<div>
+				<button id="saveBtn">Save</button>
+				<button id="testBtn" class="secondary">Test</button>
+				<button id="passwordBtn" class="secondary">Set Password</button>
+				<button id="deleteBtn" class="secondary">Delete</button>
+			</div>
+
+			<p class="small">Passwords are stored separately in VS Code SecretStorage.</p>
+		</div>
+	</div>
+
+	<script>
+		const vscode = acquireVsCodeApi();
+
+		let connections = ${connectionJson};
+		let activeConnectionName = ${activeJson};
+		let selectedName = activeConnectionName || "";
+		let passwordStatuses = ${passwordStatusJson};
+
+		function renderList() {
+			const list = document.getElementById('connectionList');
+			list.innerHTML = '';
+
+			connections.forEach(conn => {
+				const div = document.createElement('div');
+				div.className = 'connection-item' + (conn.name === selectedName ? ' active' : '');
+				div.textContent =
+					conn.name +
+					(conn.name === activeConnectionName ? ' ★' : '') +
+					(passwordStatuses[conn.name] ? ' 🔑' : '');
+				div.addEventListener('click', () => {
+					selectedName = conn.name;
+					fillForm(conn);
+					renderList();
+				});
+				list.appendChild(div);
+			});
+		}
+
+		function fillForm(conn) {
+			document.getElementById('name').value = conn?.name || '';
+			document.getElementById('user').value = conn?.user || '';
+			document.getElementById('host').value = conn?.host || '';
+			document.getElementById('port').value = conn?.port || 1521;
+			document.getElementById('serviceName').value = conn?.serviceName || '';
+			document.getElementById('owner').value = conn?.owner || 'PS';
+		}
+
+		function readForm() {
+			return {
+				name: document.getElementById('name').value.trim(),
+				user: document.getElementById('user').value.trim(),
+				host: document.getElementById('host').value.trim(),
+				port: Number(document.getElementById('port').value),
+				serviceName: document.getElementById('serviceName').value.trim(),
+				owner: document.getElementById('owner').value.trim() || 'PS'
+			};
+		}
+
+		document.getElementById('newBtn').addEventListener('click', () => {
+			selectedName = '';
+			fillForm(null);
+			renderList();
+		});
+
+		document.getElementById('saveBtn').addEventListener('click', () => {
+			vscode.postMessage({
+				command: 'saveConnection',
+				connection: readForm()
+			});
+		});
+
+		document.getElementById('testBtn').addEventListener('click', () => {
+			vscode.postMessage({
+				command: 'testConnection',
+				connection: readForm()
+			});
+		});
+
+		document.getElementById('passwordBtn').addEventListener('click', () => {
+			vscode.postMessage({
+				command: 'setPassword',
+				connectionName: document.getElementById('name').value.trim()
+			});
+		});
+
+		document.getElementById('deleteBtn').addEventListener('click', () => {
+			vscode.postMessage({
+				command: 'deleteConnection',
+				connectionName: document.getElementById('name').value.trim()
+			});
+		});
+
+		const initial = connections.find(c => c.name === selectedName) || connections[0];
+		if (initial) {
+			selectedName = initial.name;
+			fillForm(initial);
+		}
+
+		renderList();
+	</script>
+</body>
+</html>
+`;
 }
 
 // This method is called when your extension is deactivated
