@@ -1,86 +1,134 @@
 {
-  "name": "oracle-cache-up",
-  "displayName": "OracleCacheUp",
-  "description": "Cache Oracle definitions to recreate object hovers",
-  "version": "0.0.1",
-  "engines": {
-    "vscode": "^1.120.0"
-  },
-  "categories": [
-    "Other"
-  ],
-  "activationEvents": [
-    "onLanguage:sql",
-    "onLanguage:plsql",
-    "onLanguage:oracle-sql",
-    "onLanguage:oracle-plsql"
-  ],
-  "main": "./out/extension.js",
-  "contributes": {
-    "configuration": {
-        "title": "OracleCacheUp",
-        "properties": {
-            "oracleCacheUp.connections": {
-                "type": "array",
-                "default": [],
-                "description": "Saved Oracle connections",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string" },
-                        "user": { "type": "string" },
-                        "host": { "type": "string" },
-                        "port": { "type": "number", "default": 1521 },
-                        "serviceName": { "type": "string" },
-                        "owner": { "type": "string", "default": "PS" }
-                    }
-                }
-            },
-            "oracleCacheUp.activeConnection": {
-                "type": "string",
-                "default": "",
-                "description": "Name of the active Oracle connection"
-            }
-        }
+    "name": "oracle-cache-up",
+    "displayName": "OracleCacheUp",
+    "description": "Cache Oracle definitions to recreate object hovers",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.120.0"
     },
-    "commands": [
-        {
-            "command": "oracle-cache-up.addConnection",
-            "title": "OracleCacheUp: Add Connection"
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onLanguage:sql",
+        "onLanguage:plsql",
+        "onLanguage:oracle-sql",
+        "onLanguage:oracle-plsql"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "submenus": [
+            {
+                "id": "oracleCacheUp.menu",
+                "label": "OracleCacheUp"
+            }
+        ],
+        "menus": {
+            "editor/context": [
+                {
+                    "submenu": "oracleCacheUp.menu",
+                    "when": "resourceExtname == .sql || resourceExtname == .pls || resourceExtname == .plsql",
+                    "group": "9_oracle"
+                }
+            ],
+            "oracleCacheUp.menu": [
+                {
+                    "command": "oracle-cache-up.pauseHover"
+                },
+                {
+                    "command": "oracle-cache-up.resumeHover"
+                },
+                {
+                    "command": "oracle-cache-up.restartHover"
+                },
+                {
+                    "command": "oracle-cache-up.refreshCache"
+                },
+                {
+                    "command": "oracle-cache-up.manageConnections"
+                },
+                {
+                    "command": "oracle-cache-up.testConnection"
+                }
+            ]
         },
-        {
-            "command": "oracle-cache-up.refreshCache",
-            "title": "OracleCacheUp: Refresh Cache"
+        "configuration": {
+            "title": "OracleCacheUp",
+            "properties": {
+                "oracleCacheUp.connections": {
+                    "type": "array",
+                    "default": [],
+                    "description": "Saved Oracle connections",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "user": { "type": "string" },
+                            "host": { "type": "string" },
+                            "port": { "type": "number", "default": 1521 },
+                            "serviceName": { "type": "string" },
+                            "owner": { "type": "string" },
+                            "connectionType": { "type": "string" }
+                        }
+                    }
+                },
+                "oracleCacheUp.activeConnection": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Name of the active Oracle connection"
+                }
+            }
         },
-        {
-            "command": "oracle-cache-up.testConnection",
-            "title": "OracleCacheUp: Test Connection"
-        },
-        {
-            "command": "oracle-cache-up.manageConnections",
-            "title": "OracleCacheUp: Manage Connections"
-        }
-    ]
-  },
-  "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src",
-    "test": "vscode-test"
-  },
-  "devDependencies": {
-    "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "@types/vscode": "^1.120.0",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2",
-    "eslint": "^9.39.3",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.1"
-  },
-  "dependencies": {
-    "oracledb": "^7.0.0"
-  }
+        "commands": [
+            {
+                "command": "oracle-cache-up.addConnection",
+                "title": "OracleCacheUp: Add Connection"
+            },
+            {
+                "command": "oracle-cache-up.refreshCache",
+                "title": "OracleCacheUp: Refresh Metadata Cache"
+            },
+            {
+                "command": "oracle-cache-up.testConnection",
+                "title": "OracleCacheUp: Test Connection"
+            },
+            {
+                "command": "oracle-cache-up.manageConnections",
+                "title": "OracleCacheUp: Manage Connections"
+            },
+            {
+                "command": "oracle-cache-up.pauseHover",
+                "title": "OracleCacheUp: Pause Hovers"
+            },
+            {
+                "command": "oracle-cache-up.resumeHover",
+                "title": "OracleCacheUp: Resume Hovers"
+            },
+            {
+                "command": "oracle-cache-up.restartHover",
+                "title": "OracleCacheUp: Refresh Cache and Restart"
+            }
+        ]
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "eslint src",
+        "test": "vscode-test"
+    },
+    "devDependencies": {
+        "@types/mocha": "^10.0.10",
+        "@types/node": "22.x",
+        "@types/vscode": "^1.120.0",
+        "@vscode/test-cli": "^0.0.12",
+        "@vscode/test-electron": "^2.5.2",
+        "eslint": "^9.39.3",
+        "typescript": "^5.9.3",
+        "typescript-eslint": "^8.56.1"
+    },
+    "dependencies": {
+        "oracledb": "^7.0.0"
+    }
 }
