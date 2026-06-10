@@ -336,6 +336,26 @@ function getConnectionManagerHtml(
 			color: var(--vscode-descriptionForeground);
 			font-size: 12px;
 		}
+
+		.form-error {
+			background: var(--vscode-inputValidation-errorBackground);
+			border: 1px solid var(--vscode-inputValidation-errorBorder);
+			color: var(--vscode-inputValidation-errorForeground);
+			padding: 8px;
+			margin-bottom: 10px;
+			border-radius: 3px;
+		}
+
+		.field-error {
+			border: 1px solid var(--vscode-inputValidation-errorBorder) !important;
+		}
+
+		.validation-message {
+			color: var(--vscode-errorForeground);
+			font-size: 11px;
+			margin-top: 0;
+			padding-top: 2px;
+		}
 	</style>
 </head>
 <body>
@@ -350,14 +370,17 @@ function getConnectionManagerHtml(
 
 		<div id="connection-form-tile" class="hidden">
 			<h3 id="formTitle">New Connection</h3>
+			<div id="formError" class="form-error hidden"></div>
 
 			<label>Name</label>
 			<input id="name">
+			<div id="name-error" class="validation-message hidden"></div>
 
 			<div class="two-column-row">
 				<div>
 					<label>User</label>
 					<input id="user">
+					<div id="user-error" class="validation-message hidden"></div>
 				</div>
 				<div>
 					<label>Password <span class="small">(stored separately in VS Code SecretStorage)</span></label>
@@ -372,10 +395,12 @@ function getConnectionManagerHtml(
 				<div>
 					<label>Host</label>
 					<input id="host">
+					<div id="host-error" class="validation-message hidden"></div>
 				</div>
 				<div>
 					<label>Port</label>
 					<input id="port" value="1521">
+					<div id="port-error" class="validation-message hidden"></div>
 				</div>
 			</div>
 
@@ -386,11 +411,13 @@ function getConnectionManagerHtml(
 						<option value="serviceName">Service Name</option>
 						<option value="sid">SID</option>
 					</select>
+					<div id="connectionType-error" class="validation-message hidden"></div>
 				</div>
 
 				<div>
 					<label id="databaseLabel">Service Name</label>
 					<input id="databaseValue">
+					<div id="databaseValue-error" class="validation-message hidden"></div>
 				</div>
 			</div>
 
@@ -423,6 +450,29 @@ function getConnectionManagerHtml(
 		let activeConnectionName = ${activeJson};
 		let selectedName = ${selectedJson};
 		let passwordStatuses = ${passwordStatusJson};
+
+		function clearValidation() {
+			document
+				.querySelectorAll('.field-error')
+				.forEach(el => el.classList.remove('field-error'));
+
+			document
+				.querySelectorAll('.validation-message')
+				.forEach(el => {
+					el.textContent = '';
+					el.classList.add('hidden');
+				});
+		}
+
+		function showFieldError(fieldId, message) {
+			const field = document.getElementById(fieldId);
+			const error = document.getElementById(fieldId + '-error');
+
+			field.classList.add('field-error');
+
+			error.textContent = message;
+			error.classList.remove('hidden');
+		}
 
 		function showForm() {
 			document.getElementById('connection-form-tile').classList.remove('hidden');
@@ -533,44 +583,92 @@ function getConnectionManagerHtml(
 			const errors = [];
 
 			if (!form.name) {
-				errors.push('Name');
+				showFieldError(
+					'name',
+					'Required field cannot be empty.'
+				);
+				valid = false;
 			}
 
 			if (!form.user) {
-				errors.push('User');
+				showFieldError(
+					'user',
+					'Required field cannot be empty.'
+				);
+				valid = false;
 			}
 
 			if (!form.host) {
-				errors.push('Host');
+				showFieldError(
+					'host',
+					'Required field cannot be empty.'
+				);
+				valid = false;
 			}
 
 			if (!form.port) {
-				errors.push('Port');
+				showFieldError(
+					'port',
+					'Required field cannot be empty.'
+				);
+				valid = false;
 			}
 
 			if (!form.connectionType) {
-				errors.push('Type');
+				showFieldError(
+					'connectionType',
+					'Required field cannot be empty.'
+				);
+				valid = false;
 			}
 
 			if (form.connectionType === 'serviceName' && !form.serviceName) {
-				errors.push('Service Name');
+				showFieldError(
+					'serviceName',
+					'Required field cannot be empty.'
+				);
+				valid = false;
 			}
 
 			if (form.connectionType === 'sid' && !form.sid) {
-				errors.push('SID');
-			}
-
-			if (errors.length > 0) {
-				alert(
-					'Please complete:\\n\\n' +
-					errors.join('\\n')
+				showFieldError(
+					'sid',
+					'Required field cannot be empty.'
 				);
-
-				return false;
+				valid = false;
 			}
 
+			// if (errors.length > 0) {
+			// 	const errorBox = document.getElementById('formError');
+
+			// 	errorBox.innerHTML =
+			// 		'<strong>Please complete:</strong><br>' +
+			// 		errors.map(error => '- ' + error).join('<br>');
+
+			// 	errorBox.classList.remove('hidden');
+
+			// 	return false;
+			// }
+
+			// document.getElementById('formError').classList.add('hidden');
 			return true;
 		}
+		
+		document
+			.querySelectorAll('input, select')
+			.forEach(el => {
+				el.addEventListener('input', () => {
+					el.classList.remove('field-error');
+
+					const error =
+						document.getElementById(el.id + '-error');
+
+					if (error) {
+						error.textContent = '';
+						error.classList.add('hidden');
+					}
+				});
+			});
 
 		document.getElementById('connectionType').addEventListener('change', () => {
 			const dbEl = document.getElementById('databaseValue');
