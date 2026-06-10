@@ -73,8 +73,15 @@ export function registerRefreshCacheCommand(context: vscode.ExtensionContext): v
 						newCache[tableName] = {};
 					}
 
+					if (row.table_desc && !newCache[tableName]._table) {
+						newCache[tableName]._table = {
+							description: row.table_desc
+						};
+					}
+
 					newCache[tableName][fieldName] = {
-						field_data_type: row.field_data_type
+						field_data_type: row.field_data_type,
+						description: row.column_desc
 					};
 				}
 
@@ -84,7 +91,9 @@ export function registerRefreshCacheCommand(context: vscode.ExtensionContext): v
 				let fieldCount = 0;
 
 				for (const fields of Object.values(newCache)) {
-					fieldCount += Object.keys(fields).length;
+					fieldCount += Object.keys(fields).filter(
+						fieldName => fieldName !== '_table'
+					).length;
 				}
 
 				const message =

@@ -83,6 +83,11 @@
                     "type": "string",
                     "default": "",
                     "description": "Name of the active Oracle connection"
+                },
+                "oracleCacheUp.showDescriptions": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Show table and field comments/descriptions in hovers when available."
                 }
             }
         },

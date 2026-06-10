@@ -13,7 +13,17 @@ export interface OracleConnection {
 }
 
 export interface CachedField {
-	field_data_type: string;
+    field_data_type: string;
+    description?: string;
 }
 
-export type OracleMetadataCache = Record<string, Record<string, CachedField>>;
+export interface CachedTableInfo {
+    description?: string;
+}
+
+export interface CachedTable {
+    _table?: CachedTableInfo;
+    [fieldName: string]: CachedField | CachedTableInfo | undefined;
+}
+
+export type OracleMetadataCache = Record<string, CachedTable>;

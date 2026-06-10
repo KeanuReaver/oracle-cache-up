@@ -1,6 +1,6 @@
 # oracle-cache-up README
 
-This is the README for your extension "oracle-cache-up". After writing up a brief description, we recommend including the following sections.
+Caches the definition data of your chosen oracle database to allow for hover-over definitions for oracle objects.
 
 ## Features
 
@@ -8,13 +8,15 @@ Describe specific features of your extension including screenshots of your exten
 
 For example if there is an image subfolder under your extension project workspace:
 
-\!\[feature X\]\(images/feature-x.png\)
+\!\[Hover Definitions\]\(images/feature-x.png\)
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+\!\[Easy to find controls\]\(images/feature-x.png\)
+
+\!\[Connection Manager\]\(images/feature-x.png\)
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+Written specifically for PowerSchool Oracle Databases but should work with any Oracle database.
 
 ## Extension Settings
 
@@ -29,25 +31,14 @@ This extension contributes the following settings:
 
 ## Known Issues
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+A massive database where the definition json file ends up being more than 100mb might cause some memory issues.
 
 ## Release Notes
 
-Users appreciate release notes as you update your extension.
-
 ### 1.0.0
 
-Initial release of ...
+Initial Release.
 
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
 
 ## Following extension guidelines
 

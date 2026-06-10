@@ -10,6 +10,10 @@ export function registerHoverProvider(context: vscode.ExtensionContext): void {
 		['sql', 'plsql', 'oracle-sql', 'oracle-plsql'],
 		{
 			provideHover(document, position) {
+				const showDescriptions =
+					vscode.workspace
+						.getConfiguration('oracleCacheUp')
+						.get<boolean>('showDescriptions') ?? false;
 				if (hoverPaused) {
 					return;
 				}
@@ -46,7 +50,7 @@ export function registerHoverProvider(context: vscode.ExtensionContext): void {
 					const resolvedTableName = aliases[upperWord] ?? upperWord;
 
 					if (cache[resolvedTableName]) {
-						return showTableHover(resolvedTableName, cache);
+						return showTableHover(resolvedTableName, cache, showDescriptions);
 					}
 
 					if (ctes[resolvedTableName]) {
@@ -66,7 +70,7 @@ export function registerHoverProvider(context: vscode.ExtensionContext): void {
 						const resolvedTableName = aliases[qualifier] ?? qualifier;
 
 						if (cache[resolvedTableName]) {
-							return showFieldHover(resolvedTableName, upperWord, cache);
+							return showFieldHover(resolvedTableName, upperWord, cache, showDescriptions);
 						}
 
 						if (ctes[resolvedTableName]) {
@@ -82,7 +86,7 @@ export function registerHoverProvider(context: vscode.ExtensionContext): void {
 				const resolvedWord = aliases[upperWord] ?? upperWord;
 
 				if (cache[resolvedWord]) {
-					return showTableHover(resolvedWord, cache);
+					return showTableHover(resolvedWord, cache, showDescriptions);
 				}
 
 				if (ctes[resolvedWord]) {
@@ -148,7 +152,11 @@ export function registerHoverControlCommands(context: vscode.ExtensionContext): 
 	context.subscriptions.push(restartHoverCommand);
 }
 
-function showTableHover(tableName: string, cache: any): vscode.Hover | undefined {
+function showTableHover(
+    tableName: string,
+    cache: any,
+    showDescriptions: boolean
+): vscode.Hover | undefined {
 	const table = cache[tableName];
 
 	if (!table) {
@@ -157,18 +165,33 @@ function showTableHover(tableName: string, cache: any): vscode.Hover | undefined
 
 	const md = new vscode.MarkdownString();
 	md.appendMarkdown(`### ${tableName}\n\n`);
+	if (showDescriptions && table._table?.description) {
+		md.appendMarkdown(`${table._table.description}\n\n`);
+	}
 	md.appendMarkdown(`| Field | Type |\n`);
 	md.appendMarkdown(`|---|---|\n`);
 
 	for (const [fieldName, fieldInfo] of Object.entries(table)) {
+		if (fieldName === '_table') {
+			continue;
+		}
+
 		const info = fieldInfo as any;
-		md.appendMarkdown(`| ${fieldName} | ${info.field_data_type ?? ''} |\n`);
+
+		md.appendMarkdown(
+			`| ${fieldName} | ${info.field_data_type ?? ''} |\n`
+		);
 	}
 
 	return new vscode.Hover(md);
 }
 
-function showFieldHover(tableName: string, fieldName: string, cache: any): vscode.Hover | undefined {
+function showFieldHover(
+    tableName: string,
+    fieldName: string,
+    cache: any,
+    showDescriptions: boolean
+): vscode.Hover | undefined {
 	const fieldInfo = cache?.[tableName]?.[fieldName];
 
 	if (!fieldInfo) {
@@ -180,6 +203,9 @@ function showFieldHover(tableName: string, fieldName: string, cache: any): vscod
 	const md = new vscode.MarkdownString();
 	md.appendMarkdown(`### ${tableName}.${fieldName}\n\n`);
 	md.appendMarkdown(`**Type:** ${fieldInfo.field_data_type ?? ''}`);
+	if (showDescriptions && fieldInfo.description) {
+		md.appendMarkdown(`\n\n${fieldInfo.description}`);
+	}
 
 	return new vscode.Hover(md);
 }
