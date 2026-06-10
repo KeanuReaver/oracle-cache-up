@@ -10,6 +10,7 @@
         "Other"
     ],
     "activationEvents": [
+        "onStartupFinished",
         "onLanguage:sql",
         "onLanguage:plsql",
         "onLanguage:oracle-sql",
@@ -33,22 +34,23 @@
             ],
             "oracleCacheUp.menu": [
                 {
-                    "command": "oracle-cache-up.pauseHover"
-                },
-                {
-                    "command": "oracle-cache-up.resumeHover"
-                },
-                {
-                    "command": "oracle-cache-up.restartHover"
-                },
-                {
-                    "command": "oracle-cache-up.refreshCache"
-                },
-                {
                     "command": "oracle-cache-up.manageConnections"
                 },
                 {
-                    "command": "oracle-cache-up.testConnection"
+                    "command": "oracle-cache-up.pauseHover",
+                    "when": "oracleCacheUp.hasConnections && !oracleCacheUp.hoverPaused"
+                },
+                {
+                    "command": "oracle-cache-up.resumeHover",
+                    "when": "oracleCacheUp.hasConnections && oracleCacheUp.hoverPaused"
+                },
+                {
+                    "command": "oracle-cache-up.restartHover",
+                    "when": "oracleCacheUp.hasConnections"
+                },
+                {
+                    "command": "oracle-cache-up.refreshCache",
+                    "when": "oracleCacheUp.hasConnections"
                 }
             ]
         },
@@ -67,8 +69,13 @@
                             "host": { "type": "string" },
                             "port": { "type": "number", "default": 1521 },
                             "serviceName": { "type": "string" },
+                            "sid": { "type": "string" },
                             "owner": { "type": "string" },
-                            "connectionType": { "type": "string" }
+                            "connectionType": {
+                                "type": "string",
+                                "enum": ["serviceName", "sid"],
+                                "default": "serviceName"
+                            }
                         }
                     }
                 },
@@ -81,16 +88,8 @@
         },
         "commands": [
             {
-                "command": "oracle-cache-up.addConnection",
-                "title": "OracleCacheUp: Add Connection"
-            },
-            {
                 "command": "oracle-cache-up.refreshCache",
                 "title": "OracleCacheUp: Refresh Metadata Cache"
-            },
-            {
-                "command": "oracle-cache-up.testConnection",
-                "title": "OracleCacheUp: Test Connection"
             },
             {
                 "command": "oracle-cache-up.manageConnections",
