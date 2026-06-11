@@ -75,6 +75,21 @@
                                 "type": "string",
                                 "enum": ["serviceName", "sid"],
                                 "default": "serviceName"
+                            },
+                            "metadataSource": {
+                                "type": "string",
+                                "default": "generic",
+                                "enum": [
+                                    "generic",
+                                    "powerschool",
+                                    "custom"
+                                ],
+                                "description": "Metadata query source."
+                            },
+                            "customMetadataQuery": {
+                                "type": "string",
+                                "default": "",
+                                "description": "Custom metadata query. Must return table_name, field_name, field_data_type, and optionally table_desc and column_desc."
                             }
                         }
                     }

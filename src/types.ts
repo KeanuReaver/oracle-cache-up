@@ -2,14 +2,16 @@ export type ConnectionType = 'serviceName' | 'sid';
 export type MetadataMode = 'generic' | 'powerschool';
 
 export interface OracleConnection {
-	name: string;
-	user: string;
-	host: string;
-	port: number;
-	serviceName: string;
-	sid: string;
-	owner?: string;
-	connectionType: ConnectionType;
+    name: string;
+    user: string;
+    host: string;
+    port: number;
+    serviceName: string;
+    sid: string;
+    owner?: string;
+    connectionType: 'serviceName' | 'sid';
+    metadataSource?: 'generic' | 'powerschool' | 'custom';
+    customMetadataQuery?: string;
 }
 
 export interface CachedField {

@@ -3,8 +3,8 @@ import * as oracledb from 'oracledb';
 
 import { saveCache } from './cache';
 import { buildConnectString, getActiveConnection, getPasswordKey } from './connections';
-import { getGenericOracleMetadataQuery } from './metadataQueries';
-import { OracleMetadataCache } from './types';
+import { getMetadataQuery, validateCustomMetadataQuery } from './metadataQueries';
+import { OracleMetadataCache, OracleConnection } from './types';
 
 export function registerRefreshCacheCommand(context: vscode.ExtensionContext): void {
 	const refreshCacheCommand = vscode.commands.registerCommand(
@@ -39,49 +39,87 @@ export function registerRefreshCacheCommand(context: vscode.ExtensionContext): v
 					connectString: buildConnectString(activeConnection)
 				});
 
-				const metadataQuery = getGenericOracleMetadataQuery();
+				if (activeConnection.metadataSource === 'custom') {
+					const missingAliases = validateCustomMetadataQuery(
+						activeConnection.customMetadataQuery ?? ''
+					);
+
+					if (missingAliases.length > 0) {
+						vscode.window.showErrorMessage(
+							`Custom metadata query is missing required aliases: ${missingAliases.join(', ')}`
+						);
+
+						return;
+					}
+				}
+
+				const metadataQuery = getMetadataQuery(activeConnection);
 
 				const owner = activeConnection.owner;
 
-				const result = await connection.execute(
-					metadataQuery,
-					{
-						owner: owner?.trim()
-							? owner.trim().toUpperCase()
-							: null
-					},
-					{
-						fetchInfo: {
-							CACHE_JSON: {
-								type: oracledb.STRING
+				let rows: any[] = [];
+
+				if (activeConnection.metadataSource === 'custom') {
+					const result = await connection.execute(
+						metadataQuery,
+						{},
+						{
+							outFormat: (oracledb as any).OUT_FORMAT_OBJECT
+						}
+					);
+
+					rows = result.rows ?? [];
+				}
+				else {
+					const result = await connection.execute(
+						metadataQuery,
+						{
+							owner: owner?.trim()
+								? owner.trim().toUpperCase()
+								: null
+						},
+						{
+							fetchInfo: {
+								CACHE_JSON: {
+									type: oracledb.STRING
+								}
 							}
 						}
-					}
-				);
+					);
 
-				const jsonText = result.rows?.[0]?.[0] as string;
-
-				const rows = JSON.parse(jsonText || '[]');
+					const jsonText = result.rows?.[0]?.[0] as string;
+					rows = JSON.parse(jsonText || '[]');
+				}
 
 				const newCache: OracleMetadataCache = {};
 
 				for (const row of rows) {
-					const tableName = row.table_name.toUpperCase();
-					const fieldName = row.field_name.toUpperCase();
+					const tableNameRaw = row.table_name ?? row.TABLE_NAME;
+					const fieldNameRaw = row.field_name ?? row.FIELD_NAME;
+					const fieldDataType = row.field_data_type ?? row.FIELD_DATA_TYPE;
+					const tableDesc = row.table_desc ?? row.TABLE_DESC;
+					const columnDesc = row.column_desc ?? row.COLUMN_DESC;
+
+					if (!tableNameRaw || !fieldNameRaw || !fieldDataType) {
+						continue;
+					}
+
+					const tableName = String(tableNameRaw).toUpperCase();
+					const fieldName = String(fieldNameRaw).toUpperCase();
 
 					if (!newCache[tableName]) {
 						newCache[tableName] = {};
 					}
 
-					if (row.table_desc && !newCache[tableName]._table) {
+					if (tableDesc && !newCache[tableName]._table) {
 						newCache[tableName]._table = {
-							description: row.table_desc
+							description: String(tableDesc)
 						};
 					}
 
 					newCache[tableName][fieldName] = {
-						field_data_type: row.field_data_type,
-						description: row.column_desc
+						field_data_type: String(fieldDataType),
+						description: columnDesc ? String(columnDesc) : undefined
 					};
 				}
 
@@ -120,4 +158,82 @@ export function registerRefreshCacheCommand(context: vscode.ExtensionContext): v
 	);
 
 	context.subscriptions.push(refreshCacheCommand);
+}
+
+export async function testCustomMetadataQuery(
+    context: vscode.ExtensionContext,
+    connectionInfo: OracleConnection
+): Promise<void> {
+    const missingAliases = validateCustomMetadataQuery(
+        connectionInfo.customMetadataQuery ?? ''
+    );
+
+    if (missingAliases.length > 0) {
+        throw new Error(
+            `Missing required aliases: ${missingAliases.join(', ')}`
+        );
+    }
+
+    const password = await context.secrets.get(
+        getPasswordKey(connectionInfo.name)
+    );
+
+    if (!password) {
+        throw new Error(`No password saved for "${connectionInfo.name}".`);
+    }
+
+    let connection: any;
+
+    try {
+        connection = await oracledb.getConnection({
+            user: connectionInfo.user,
+            password,
+            connectString: buildConnectString(connectionInfo)
+        });
+
+		const customQuery = (connectionInfo.customMetadataQuery ?? '')
+			.trim()
+			.replace(/;$/, '');
+
+        const testQuery = `
+            SELECT *
+            FROM (
+                ${customQuery}
+            )
+            WHERE ROWNUM <= 1
+        `;
+
+        const result = await connection.execute(
+            testQuery,
+            {},
+            {
+                outFormat: (oracledb as any).OUT_FORMAT_OBJECT
+            }
+        );
+
+        const row = result.rows?.[0];
+
+        if (!row) {
+            throw new Error('Query returned no rows.');
+        }
+
+        const required = ['TABLE_NAME', 'FIELD_NAME', 'FIELD_DATA_TYPE'];
+
+        const rowKeys = Object.keys(row).map(key => key.toUpperCase());
+
+        const missing = required.filter(
+            key => !rowKeys.includes(key)
+        );
+
+        if (missing.length > 0) {
+            throw new Error(
+                `Query result is missing required columns: ${missing.join(', ')}`
+            );
+        }
+    }
+    finally {
+        if (connection) {
+            await connection.close();
+        }
+    }
 }

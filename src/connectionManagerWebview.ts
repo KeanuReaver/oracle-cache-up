@@ -9,6 +9,7 @@ import {
 	testOracleConnection,
 	validateConnection
 } from './connections';
+import { testCustomMetadataQuery } from './cacheRefresh';
 import { OracleConnection } from './types';
 
 export function registerManageConnectionsCommand(context: vscode.ExtensionContext): void {
@@ -27,6 +28,27 @@ export function registerManageConnectionsCommand(context: vscode.ExtensionContex
 			await renderConnectionManager(panel, context);
 			
 			panel.webview.onDidReceiveMessage(async message => {
+				if (message.command === 'testCustomMetadataQuery') {
+					const connectionInfo = message.connection as OracleConnection;
+
+					try {
+						await testCustomMetadataQuery(context, connectionInfo);
+
+						panel.webview.postMessage({
+							command: 'testCustomMetadataQueryFinished'
+						});
+
+						vscode.window.showInformationMessage(
+							'Custom metadata query returned the required fields.'
+						);
+					}
+					catch (err: any) {
+						vscode.window.showErrorMessage(
+							`Custom metadata query failed: ${err.message}`
+						);
+					}
+				}
+
 				if (message.command === 'makeActive') {
 					const connection = message.connection as OracleConnection;
 
@@ -84,6 +106,10 @@ export function registerManageConnectionsCommand(context: vscode.ExtensionContex
 							context,
 							testConnection
 						);
+
+						panel.webview.postMessage({
+							command: 'testConnectionFinished'
+						});
 
 						vscode.window.showInformationMessage(
 							`Connection successful: ${JSON.stringify(resultRows)}`
@@ -356,6 +382,43 @@ function getConnectionManagerHtml(
 			margin-top: 0;
 			padding-top: 2px;
 		}
+
+		textarea {
+			width: 100%;
+			min-height: 180px;
+			box-sizing: border-box;
+			background: var(--vscode-input-background);
+			color: var(--vscode-input-foreground);
+			border: 1px solid var(--vscode-input-border);
+			padding: 6px;
+			border-radius: 2px;
+			font-family: var(--vscode-editor-font-family);
+		}
+
+		.inline-status {
+			color: var(--vscode-descriptionForeground);
+			font-size: 12px;
+			margin-left: 4px;
+		}
+
+		.inline-status::before {
+			content: '';
+			display: inline-block;
+			width: 10px;
+			height: 10px;
+			margin-right: 6px;
+			border: 2px solid var(--vscode-descriptionForeground);
+			border-top-color: transparent;
+			border-radius: 50%;
+			animation: spin 0.8s linear infinite;
+			vertical-align: -2px;
+		}
+
+		@keyframes spin {
+			to {
+				transform: rotate(360deg);
+			}
+		}
 	</style>
 </head>
 <body>
@@ -424,10 +487,30 @@ function getConnectionManagerHtml(
 			<label>Schema Owner <span class="small">(optional)</span></label>
 			<input id="owner">
 
+			<label>Metadata Source</label>
+			<select id="metadataSource">
+				<option value="generic">Generic Oracle</option>
+				<option value="powerschool">PowerSchool</option>
+				<option value="custom">Custom SQL</option>
+			</select>
+			<div id="metadataSource-error" class="validation-message hidden"></div>
+
+			<div id="customQueryBlock" class="hidden">
+				<label>Custom Metadata Query</label>
+				<textarea id="customMetadataQuery"></textarea>
+				<div id="customMetadataQuery-error" class="validation-message hidden"></div>
+				<p class="small">
+					Must return table_name, field_name, field_data_type. Optional: table_desc, column_desc.
+				</p>
+				<button id="testCustomQueryBtn" class="secondary">Test Query</button>
+				<span id="testCustomQueryStatus" class="inline-status hidden">Testing...</span>
+			</div>
+
 			<div class="button-row">
 				<div class="button-group">
 					<button id="cancelBtn" class="secondary">Cancel</button>
 					<button id="testBtn" class="secondary">Test</button>
+					<span id="testStatus" class="inline-status hidden">Testing...</span>
 				</div>
 
 				<div class="button-group">
@@ -537,6 +620,10 @@ function getConnectionManagerHtml(
 			document.getElementById('host').value = conn?.host || '';
 			document.getElementById('port').value = conn?.port || 1521;
 			document.getElementById('owner').value = conn?.owner || '';
+			document.getElementById('metadataSource').value = conn?.metadataSource || 'generic';
+			document.getElementById('customMetadataQuery').value = conn?.customMetadataQuery || '';
+
+			updateMetadataSourceDisplay();
 
 			const typeEl = document.getElementById('connectionType');
 			const dbEl = document.getElementById('databaseValue');
@@ -573,7 +660,9 @@ function getConnectionManagerHtml(
 				connectionType: type,
 				serviceName: dbEl.dataset.serviceName || '',
 				sid: dbEl.dataset.sid || '',
-				owner: document.getElementById('owner').value.trim()
+				owner: document.getElementById('owner').value.trim(),
+				metadataSource: document.getElementById('metadataSource').value || 'generic',
+				customMetadataQuery: document.getElementById('customMetadataQuery').value.trim()
 			};
 		}
 
@@ -638,21 +727,78 @@ function getConnectionManagerHtml(
 				valid = false;
 			}
 
-			// if (errors.length > 0) {
-			// 	const errorBox = document.getElementById('formError');
-
-			// 	errorBox.innerHTML =
-			// 		'<strong>Please complete:</strong><br>' +
-			// 		errors.map(error => '- ' + error).join('<br>');
-
-			// 	errorBox.classList.remove('hidden');
-
-			// 	return false;
-			// }
+			if (form.metadataSource === 'custom' && !form.customMetadataQuery) {
+				showFieldError(
+					'customMetadataQuery',
+					'Required field cannot be empty.'
+				);
+				valid = false;
+			}
 
 			// document.getElementById('formError').classList.add('hidden');
 			return true;
 		}
+
+		function updateMetadataSourceDisplay() {
+			const source = document.getElementById('metadataSource').value;
+			const block = document.getElementById('customQueryBlock');
+
+			if (source === 'custom') {
+				block.classList.remove('hidden');
+			}
+			else {
+				block.classList.add('hidden');
+			}
+		}
+
+		function setBusy(statusId, buttonId, isBusy) {
+			const status = document.getElementById(statusId);
+			const button = document.getElementById(buttonId);
+
+			status.classList.toggle('hidden', !isBusy);
+			button.disabled = isBusy;
+		}
+
+		document.getElementById('testBtn').addEventListener('click', () => {
+			if (!validateForm()) {
+				return;
+			}
+
+			setBusy('testStatus', 'testBtn', true);
+
+			vscode.postMessage({
+				command: 'testConnection',
+				connection: readForm()
+			});
+		});
+
+		document.getElementById('testCustomQueryBtn').addEventListener('click', () => {
+			if (!validateForm()) {
+				return;
+			}
+
+			setBusy('testCustomQueryStatus', 'testCustomQueryBtn', true);
+
+			vscode.postMessage({
+				command: 'testCustomMetadataQuery',
+				connection: readForm()
+			});
+		});
+
+		document.getElementById('testCustomQueryBtn').addEventListener('click', () => {
+			if (!validateForm()) {
+				return;
+			}
+
+			vscode.postMessage({
+				command: 'testCustomMetadataQuery',
+				connection: readForm()
+			});
+		});
+
+		document.getElementById('metadataSource').addEventListener('change', () => {
+			updateMetadataSourceDisplay();
+		});
 		
 		document
 			.querySelectorAll('input, select')
@@ -750,6 +896,18 @@ function getConnectionManagerHtml(
 				command: 'deleteConnection',
 				connectionName: document.getElementById('name').value.trim()
 			});
+		});
+
+		window.addEventListener('message', event => {
+			const message = event.data;
+
+			if (message.command === 'testConnectionFinished') {
+				setBusy('testStatus', 'testBtn', false);
+			}
+
+			if (message.command === 'testCustomMetadataQueryFinished') {
+				setBusy('testCustomQueryStatus', 'testCustomQueryBtn', false);
+			}
 		});
 
 		const initial = connections.find(c => c.name === selectedName);
