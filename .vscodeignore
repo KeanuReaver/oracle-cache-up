@@ -11,3 +11,5 @@ vsc-extension-quickstart.md
 **/*.ts
 **/.vscode-test.*
 images/*.mov
+out/test/**
+**/*.test.js

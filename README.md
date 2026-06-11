@@ -15,10 +15,8 @@ OracleCacheUp caches Oracle database metadata locally to provide rich hover defi
 - Secure password storage using VS Code SecretStorage
 - Generic Oracle, PowerSchool, and Custom metadata sources
 
-Customizable hover definitions for oracle database objects:
-![Hover Definitions](images/hoverEffect.gif)
+![Hover Definitions](images/hoverEffect_small.gif)
 
-Store table definitions in weird places? make a custom query to find them for the hover. Otherwise use the generic query or a special powerschool query. Fully functional connection manager:
 ![Easy to find controls](images/customQuery.png)
 
 ## Requirements
