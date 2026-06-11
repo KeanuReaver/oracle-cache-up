@@ -157,5 +157,6 @@
     },
     "dependencies": {
         "oracledb": "^7.0.0"
-    }
+    },
+    "license": "MIT"
 }
