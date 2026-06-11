@@ -1,62 +1,59 @@
 # oracle-cache-up README
 
-Caches the definition data of your chosen oracle database to allow for hover-over definitions for oracle objects.
+OracleCacheUp caches Oracle database metadata locally to provide rich hover definitions for tables, views, fields, aliases, CTEs, and inline views directly in SQL files.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- Hover table definitions
+- Hover field datatypes
+- Resolve table aliases
+- Resolve Common Table Expressions (CTEs)
+- Resolve inline views
+- Resolve derived CASE expressions
+- Optional field and table descriptions
+- Multiple saved Oracle connections
+- Secure password storage using VS Code SecretStorage
+- Generic Oracle, PowerSchool, and Custom metadata sources
 
-For example if there is an image subfolder under your extension project workspace:
+Customizable hover definitions for oracle database objects:
+![Hover Definitions](images/hoverEffect.gif)
 
-\!\[Hover Definitions\]\(images/feature-x.png\)
-
-\!\[Easy to find controls\]\(images/feature-x.png\)
-
-\!\[Connection Manager\]\(images/feature-x.png\)
+Store table definitions in weird places? make a custom query to find them for the hover. Otherwise use the generic query or a special powerschool query. Fully functional connection manager:
+![Easy to find controls](images/customQuery.png)
 
 ## Requirements
 
-Written specifically for PowerSchool Oracle Databases but should work with any Oracle database.
+Works with Oracle databases.
+
+Includes built-in metadata support for:
+- Generic Oracle databases
+- PowerSchool Oracle databases
+
+Custom metadata queries can also be configured for environments that store metadata in non-standard locations.
+
+## Getting Started
+
+1. Open any SQL file.
+2. Right-click and select OracleCacheUp → Manage Connections.
+3. Create a connection.
+4. Save a password.
+5. Refresh the metadata cache.
+6. Hover Oracle objects to view definitions.
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
 This extension contributes the following settings:
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+* `oracleCacheUp.connections`: Array of saved connections
+* `oracleCacheUp.activeConnection`: Currently active/default connection
+* `oracleCacheUp.showDescriptions`: Show/Hide table and field descriptions in the hover data (if available)
 
 ## Known Issues
 
-A massive database where the definition json file ends up being more than 100mb might cause some memory issues.
+Very large metadata caches (100MB+) may increase memory usage and impact hover performance.
 
 ## Release Notes
 
 ### 1.0.0
 
 Initial Release.
-
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**

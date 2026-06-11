@@ -140,9 +140,14 @@ export function registerHoverControlCommands(context: vscode.ExtensionContext): 
 
 	const restartHoverCommand = vscode.commands.registerCommand(
 		'oracle-cache-up.restartHover',
-		() => {
+		async () => {
 			hoverPaused = false;
 			loadCache();
+			await vscode.commands.executeCommand(
+				'setContext',
+				'oracleCacheUp.hoverPaused',
+				false
+			);
 			vscode.window.showInformationMessage('OracleCacheUp hovers restarted.');
 		}
 	);
@@ -276,7 +281,7 @@ function showCteFieldHover(
     const md = new vscode.MarkdownString();
 
     md.appendMarkdown(`### ${cte.name}.${fieldName}\n\n`);
-    md.appendMarkdown(`**Derived from:** \`${source}\`  \n`);
+    md.appendMarkdown(`**Derived from:** \`${tableCell(source)}\`  \n`);
 
     if (datatype) {
         md.appendMarkdown(`**Type:** ${datatype}`);

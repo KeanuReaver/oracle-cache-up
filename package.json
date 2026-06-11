@@ -2,7 +2,15 @@
     "name": "oracle-cache-up",
     "displayName": "OracleCacheUp",
     "description": "Cache Oracle definitions to recreate object hovers",
-    "version": "0.0.1",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/KeanuReaver/oracle-cache-up"
+    },
+    "homepage": "https://github.com/KeanuReaver/oracle-cache-up",
+    "bugs": {
+        "url": "https://github.com/KeanuReaver/oracle-cache-up/issues"
+    },
+    "version": "1.0.0",
     "engines": {
         "vscode": "^1.120.0"
     },
@@ -125,7 +133,7 @@
             },
             {
                 "command": "oracle-cache-up.restartHover",
-                "title": "OracleCacheUp: Refresh Cache and Restart"
+                "title": "OracleCacheUp: Reload Local Cache"
             }
         ]
     },
