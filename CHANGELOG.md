@@ -2,8 +2,14 @@
 
 All notable changes to the "oracle-cache-up" extension will be documented in this file.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+## [1.0.1]
 
-## [Unreleased]
+### Changed
 
-- Initial release
+- Lowered the minimum supported VS Code version from `1.120.0` to `1.85.0`.
+
+## [1.0.0]
+
+### Added
+
+- Initial release.
