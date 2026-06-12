@@ -13,3 +13,4 @@ vsc-extension-quickstart.md
 images/*.mov
 out/test/**
 **/*.test.js
+images/palette.png

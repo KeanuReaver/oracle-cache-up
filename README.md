@@ -2,6 +2,21 @@
 
 OracleCacheUp caches Oracle database metadata locally to provide rich hover definitions for tables, views, fields, aliases, CTEs, and inline views directly in SQL files.
 
+## Why OracleCacheUp
+
+Many Oracle developers relied on metadata hovers in previous Oracle VS Code tooling to quickly inspect table structures and field definitions while writing SQL.
+
+OracleCacheUp restores that workflow by building a local metadata cache and providing rich hover information directly within SQL files.
+
+Unlike the original implementation, OracleCacheUp also understands:
+
+- Table aliases
+- Common Table Expressions (CTEs)
+- Nested CTEs
+- Inline views
+- Derived CASE expressions
+- Custom metadata sources
+
 ## Features
 
 - Hover table definitions
@@ -24,10 +39,11 @@ OracleCacheUp caches Oracle database metadata locally to provide rich hover defi
 Works with Oracle databases.
 
 Includes built-in metadata support for:
+
 - Generic Oracle databases
 - PowerSchool Oracle databases
 
-Custom metadata queries can also be configured for environments that store metadata in non-standard locations.
+Advanced users may also enter custom metadata queries for environments that store metadata in non-standard locations, or manually edit the generated `cache/metadata.json` file to provide metadata without connecting to a database.
 
 ## Getting Started
 

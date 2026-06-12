@@ -12,6 +12,8 @@ import {
 import { testCustomMetadataQuery } from './cacheRefresh';
 import { OracleConnection } from './types';
 
+const SAVED_PASSWORD_PLACEHOLDER = '********';
+
 export function registerManageConnectionsCommand(context: vscode.ExtensionContext): void {
 	const manageConnectionsCommand = vscode.commands.registerCommand(
 		'oracle-cache-up.manageConnections',
@@ -26,17 +28,22 @@ export function registerManageConnectionsCommand(context: vscode.ExtensionContex
 			);
 
 			await renderConnectionManager(panel, context);
-			
+
 			panel.webview.onDidReceiveMessage(async message => {
 				if (message.command === 'testCustomMetadataQuery') {
 					const connectionInfo = message.connection as OracleConnection;
 
 					try {
-						await testCustomMetadataQuery(context, connectionInfo);
+						const password = cleanPassword(message.password);
 
-						panel.webview.postMessage({
-							command: 'testCustomMetadataQueryFinished'
-						});
+						if (password) {
+							await context.secrets.store(
+								getPasswordKey(connectionInfo.name),
+								password
+							);
+						}
+
+						await testCustomMetadataQuery(context, connectionInfo);
 
 						vscode.window.showInformationMessage(
 							'Custom metadata query returned the required fields.'
@@ -46,6 +53,11 @@ export function registerManageConnectionsCommand(context: vscode.ExtensionContex
 						vscode.window.showErrorMessage(
 							`Custom metadata query failed: ${err.message}`
 						);
+					}
+					finally {
+						panel.webview.postMessage({
+							command: 'testCustomMetadataQueryFinished'
+						});
 					}
 				}
 
@@ -57,38 +69,28 @@ export function registerManageConnectionsCommand(context: vscode.ExtensionContex
 						return;
 					}
 
+					const errors = validateConnection(connection);
+
+					if (errors.length > 0) {
+						vscode.window.showErrorMessage(`Connection is missing: ${errors.join(', ')}`);
+						return;
+					}
+
+					await upsertConnection(connection);
+
+					const password = cleanPassword(message.password);
+
+					if (password) {
+						await context.secrets.store(
+							getPasswordKey(connection.name),
+							password
+						);
+					}
+
 					await setActiveConnection(connection.name);
 					await renderConnectionManager(panel, context, connection.name);
 
 					vscode.window.showInformationMessage(`Active connection set to "${connection.name}".`);
-				}
-
-				if (message.command === 'setPassword') {
-					const connectionName = message.connectionName as string;
-
-					if (!connectionName) {
-						vscode.window.showErrorMessage('Enter a connection name before setting a password.');
-						return;
-					}
-
-					const password = await vscode.window.showInputBox({
-						prompt: `Enter password for ${connectionName}`,
-						password: true,
-						ignoreFocusOut: true
-					});
-
-					if (!password) {
-						return;
-					}
-
-					await context.secrets.store(
-						getPasswordKey(connectionName),
-						password
-					);
-
-					await renderConnectionManager(panel, context, connectionName);
-
-					vscode.window.showInformationMessage(`Password saved for "${connectionName}".`);
 				}
 
 				if (message.command === 'testConnection') {
@@ -102,14 +104,19 @@ export function registerManageConnectionsCommand(context: vscode.ExtensionContex
 					}
 
 					try {
+						const password = cleanPassword(message.password);
+
+						if (password) {
+							await context.secrets.store(
+								getPasswordKey(testConnection.name),
+								password
+							);
+						}
+
 						const resultRows = await testOracleConnection(
 							context,
 							testConnection
 						);
-
-						panel.webview.postMessage({
-							command: 'testConnectionFinished'
-						});
 
 						vscode.window.showInformationMessage(
 							`Connection successful: ${JSON.stringify(resultRows)}`
@@ -117,6 +124,11 @@ export function registerManageConnectionsCommand(context: vscode.ExtensionContex
 					}
 					catch (err: any) {
 						vscode.window.showErrorMessage(`Connection failed: ${err.message}`);
+					}
+					finally {
+						panel.webview.postMessage({
+							command: 'testConnectionFinished'
+						});
 					}
 				}
 
@@ -175,22 +187,18 @@ export function registerManageConnectionsCommand(context: vscode.ExtensionContex
 						return;
 					}
 
-					const connections = getConnections();
+					await upsertConnection(savedConnection);
 
-					const existingIndex = connections.findIndex(
-						c => c.name === savedConnection.name
-					);
+					const password = cleanPassword(message.password);
 
-					if (existingIndex >= 0) {
-						connections[existingIndex] = savedConnection;
-					}
-					else {
-						connections.push(savedConnection);
+					if (password) {
+						await context.secrets.store(
+							getPasswordKey(savedConnection.name),
+							password
+						);
 					}
 
-					await saveConnections(connections);
 					await setActiveConnection(savedConnection.name);
-
 					await renderConnectionManager(panel, context, savedConnection.name);
 
 					vscode.window.showInformationMessage('Connection saved.');
@@ -200,6 +208,37 @@ export function registerManageConnectionsCommand(context: vscode.ExtensionContex
 	);
 
 	context.subscriptions.push(manageConnectionsCommand);
+}
+
+function cleanPassword(password: unknown): string {
+	if (typeof password !== 'string') {
+		return '';
+	}
+
+	const trimmedPassword = password.trim();
+
+	if (!trimmedPassword || trimmedPassword === SAVED_PASSWORD_PLACEHOLDER) {
+		return '';
+	}
+
+	return password;
+}
+
+async function upsertConnection(connection: OracleConnection): Promise<void> {
+	const connections = getConnections();
+
+	const existingIndex = connections.findIndex(
+		c => c.name === connection.name
+	);
+
+	if (existingIndex >= 0) {
+		connections[existingIndex] = connection;
+	}
+	else {
+		connections.push(connection);
+	}
+
+	await saveConnections(connections);
 }
 
 async function renderConnectionManager(
@@ -230,6 +269,7 @@ function getConnectionManagerHtml(
 	const activeJson = JSON.stringify(activeConnectionName);
 	const passwordStatusJson = JSON.stringify(passwordStatuses);
 	const selectedJson = JSON.stringify(selectedConnectionName);
+	const passwordPlaceholderJson = JSON.stringify(SAVED_PASSWORD_PLACEHOLDER);
 
 	return `
 <!DOCTYPE html>
@@ -241,6 +281,11 @@ function getConnectionManagerHtml(
 			color: var(--vscode-foreground);
 			background: var(--vscode-editor-background);
 			padding: 16px;
+			box-sizing: border-box;
+		}
+
+		* {
+			box-sizing: border-box;
 		}
 
 		.hidden {
@@ -256,12 +301,15 @@ function getConnectionManagerHtml(
 
 		.layout {
 			display: grid;
-			grid-template-columns: 260px 1fr;
+			grid-template-columns: minmax(220px, 260px) minmax(0, 760px);
 			gap: 16px;
+			align-items: start;
+			max-width: 1040px;
 		}
 
 		#connection-form-tile {
-			width: 800px;
+			width: 100%;
+			max-width: 760px;
 		}
 
 		.connection-list {
@@ -293,12 +341,15 @@ function getConnectionManagerHtml(
 
 		.two-column-row {
 			display: grid;
-			grid-template-columns: 180px 1fr;
+			grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
 			gap: 12px;
 		}
 
-		input, select {
+		input,
+		select,
+		textarea {
 			width: 100%;
+			min-width: 0;
 			box-sizing: border-box;
 			background: var(--vscode-input-background);
 			color: var(--vscode-input-foreground);
@@ -307,22 +358,25 @@ function getConnectionManagerHtml(
 			border-radius: 2px;
 		}
 
-		.password-row {
-			display: flex;
-			align-items: center;
-			gap: 10px;
+		textarea {
+			min-height: 180px;
+			font-family: var(--vscode-editor-font-family);
 		}
 
 		.button-row {
 			display: flex;
 			justify-content: space-between;
-			align-items: center;
+			align-items: flex-start;
+			gap: 12px;
 			margin-top: 14px;
+			flex-wrap: wrap;
 		}
 
 		.button-group {
 			display: flex;
 			gap: 6px;
+			flex-wrap: wrap;
+			align-items: center;
 		}
 
 		button {
@@ -330,7 +384,7 @@ function getConnectionManagerHtml(
 			color: var(--vscode-button-foreground);
 			border: none;
 			padding: 6px 10px;
-			margin-right: 6px;
+			margin-right: 0;
 			margin-top: 14px;
 			cursor: pointer;
 			border-radius: 2px;
@@ -354,22 +408,14 @@ function getConnectionManagerHtml(
 			opacity: 0.85;
 		}
 
-		button#passwordBtn {
-			margin-top: 1px;
+		button:disabled {
+			opacity: 0.5;
+			cursor: not-allowed;
 		}
 
 		.small {
 			color: var(--vscode-descriptionForeground);
 			font-size: 12px;
-		}
-
-		.form-error {
-			background: var(--vscode-inputValidation-errorBackground);
-			border: 1px solid var(--vscode-inputValidation-errorBorder);
-			color: var(--vscode-inputValidation-errorForeground);
-			padding: 8px;
-			margin-bottom: 10px;
-			border-radius: 3px;
 		}
 
 		.field-error {
@@ -381,18 +427,6 @@ function getConnectionManagerHtml(
 			font-size: 11px;
 			margin-top: 0;
 			padding-top: 2px;
-		}
-
-		textarea {
-			width: 100%;
-			min-height: 180px;
-			box-sizing: border-box;
-			background: var(--vscode-input-background);
-			color: var(--vscode-input-foreground);
-			border: 1px solid var(--vscode-input-border);
-			padding: 6px;
-			border-radius: 2px;
-			font-family: var(--vscode-editor-font-family);
 		}
 
 		.inline-status {
@@ -414,6 +448,41 @@ function getConnectionManagerHtml(
 			vertical-align: -2px;
 		}
 
+		@media (max-width: 850px) {
+			.layout {
+				grid-template-columns: 1fr;
+				max-width: 760px;
+			}
+
+			#connection-form-tile {
+				max-width: 100%;
+			}
+		}
+
+		@media (max-width: 560px) {
+			body {
+				padding: 10px;
+			}
+
+			.two-column-row {
+				grid-template-columns: 1fr;
+				gap: 0;
+			}
+
+			.button-row {
+				flex-direction: column;
+				align-items: stretch;
+			}
+
+			.button-group {
+				width: 100%;
+			}
+
+			.button-group button {
+				flex: 1;
+			}
+		}
+
 		@keyframes spin {
 			to {
 				transform: rotate(360deg);
@@ -433,7 +502,6 @@ function getConnectionManagerHtml(
 
 		<div id="connection-form-tile" class="hidden">
 			<h3 id="formTitle">New Connection</h3>
-			<div id="formError" class="form-error hidden"></div>
 
 			<label>Name</label>
 			<input id="name">
@@ -446,11 +514,10 @@ function getConnectionManagerHtml(
 					<div id="user-error" class="validation-message hidden"></div>
 				</div>
 				<div>
-					<label>Password <span class="small">(stored separately in VS Code SecretStorage)</span></label>
-					<div class="password-row">
-						<button id="passwordBtn" class="secondary">Set Password</button>
-						<span id="passwordStatus">Not saved</span>
-					</div>
+					<label>Password <span class="small">(stored in VS Code SecretStorage)</span></label>
+					<input id="password" type="password" autocomplete="off">
+					<div id="password-error" class="validation-message hidden"></div>
+					<span id="passwordStatus" class="small">No password saved.</span>
 				</div>
 			</div>
 
@@ -528,6 +595,7 @@ function getConnectionManagerHtml(
 
 	<script>
 		const vscode = acquireVsCodeApi();
+		const SAVED_PASSWORD_PLACEHOLDER = ${passwordPlaceholderJson};
 
 		let connections = ${connectionJson};
 		let activeConnectionName = ${activeJson};
@@ -551,10 +619,14 @@ function getConnectionManagerHtml(
 			const field = document.getElementById(fieldId);
 			const error = document.getElementById(fieldId + '-error');
 
-			field.classList.add('field-error');
+			if (field) {
+				field.classList.add('field-error');
+			}
 
-			error.textContent = message;
-			error.classList.remove('hidden');
+			if (error) {
+				error.textContent = message;
+				error.classList.remove('hidden');
+			}
 		}
 
 		function showForm() {
@@ -565,6 +637,14 @@ function getConnectionManagerHtml(
 		function hideForm() {
 			document.getElementById('connection-form-tile').classList.add('hidden');
 			document.getElementById('form-placeholder').classList.remove('hidden');
+		}
+
+		function isExistingConnectionName(name) {
+			return connections.some(c => c.name === name);
+		}
+
+		function hasSavedPassword(name) {
+			return Boolean(name && passwordStatuses[name]);
 		}
 
 		function renderList() {
@@ -578,12 +658,14 @@ function getConnectionManagerHtml(
 					conn.name +
 					(conn.name === activeConnectionName ? ' ★' : '') +
 					(passwordStatuses[conn.name] ? ' 🔑' : '');
+
 				div.addEventListener('click', () => {
 					selectedName = conn.name;
 					fillForm(conn);
 					showForm();
 					renderList();
 				});
+
 				list.appendChild(div);
 			});
 		}
@@ -614,7 +696,21 @@ function getConnectionManagerHtml(
 			}
 		}
 
+		function updateMetadataSourceDisplay() {
+			const source = document.getElementById('metadataSource').value;
+			const block = document.getElementById('customQueryBlock');
+
+			if (source === 'custom') {
+				block.classList.remove('hidden');
+			}
+			else {
+				block.classList.add('hidden');
+			}
+		}
+
 		function fillForm(conn) {
+			clearValidation();
+
 			document.getElementById('name').value = conn?.name || '';
 			document.getElementById('user').value = conn?.user || '';
 			document.getElementById('host').value = conn?.host || '';
@@ -623,7 +719,15 @@ function getConnectionManagerHtml(
 			document.getElementById('metadataSource').value = conn?.metadataSource || 'generic';
 			document.getElementById('customMetadataQuery').value = conn?.customMetadataQuery || '';
 
-			updateMetadataSourceDisplay();
+			const hasPassword = hasSavedPassword(conn?.name || '');
+
+			document.getElementById('password').value =
+				hasPassword ? SAVED_PASSWORD_PLACEHOLDER : '';
+
+			document.getElementById('passwordStatus').textContent =
+				hasPassword
+					? 'Password saved.'
+					: 'No password saved.';
 
 			const typeEl = document.getElementById('connectionType');
 			const dbEl = document.getElementById('databaseValue');
@@ -634,11 +738,17 @@ function getConnectionManagerHtml(
 
 			updateDatabaseLabel();
 			updateFormTitle(conn);
+			updateMetadataSourceDisplay();
+		}
 
-			const hasPassword = conn?.name && passwordStatuses[conn.name];
+		function readPassword() {
+			const value = document.getElementById('password').value;
 
-			document.getElementById('passwordStatus').textContent =
-				hasPassword ? 'Saved 🔑' : 'Not saved';
+			if (value === SAVED_PASSWORD_PLACEHOLDER) {
+				return '';
+			}
+
+			return value;
 		}
 
 		function readForm() {
@@ -667,88 +777,57 @@ function getConnectionManagerHtml(
 		}
 
 		function validateForm() {
-			const form = readForm();
+			clearValidation();
 
-			const errors = [];
+			const form = readForm();
+			let valid = true;
 
 			if (!form.name) {
-				showFieldError(
-					'name',
-					'Required field cannot be empty.'
-				);
+				showFieldError('name', 'Required field cannot be empty.');
 				valid = false;
 			}
 
 			if (!form.user) {
-				showFieldError(
-					'user',
-					'Required field cannot be empty.'
-				);
+				showFieldError('user', 'Required field cannot be empty.');
 				valid = false;
 			}
 
 			if (!form.host) {
-				showFieldError(
-					'host',
-					'Required field cannot be empty.'
-				);
+				showFieldError('host', 'Required field cannot be empty.');
 				valid = false;
 			}
 
-			if (!form.port) {
-				showFieldError(
-					'port',
-					'Required field cannot be empty.'
-				);
+			if (!form.port || Number.isNaN(Number(form.port))) {
+				showFieldError('port', 'Required field cannot be empty.');
 				valid = false;
 			}
 
 			if (!form.connectionType) {
-				showFieldError(
-					'connectionType',
-					'Required field cannot be empty.'
-				);
+				showFieldError('connectionType', 'Required field cannot be empty.');
 				valid = false;
 			}
 
 			if (form.connectionType === 'serviceName' && !form.serviceName) {
-				showFieldError(
-					'serviceName',
-					'Required field cannot be empty.'
-				);
+				showFieldError('databaseValue', 'Required field cannot be empty.');
 				valid = false;
 			}
 
 			if (form.connectionType === 'sid' && !form.sid) {
-				showFieldError(
-					'sid',
-					'Required field cannot be empty.'
-				);
+				showFieldError('databaseValue', 'Required field cannot be empty.');
+				valid = false;
+			}
+
+			if (!hasSavedPassword(form.name) && !readPassword()) {
+				showFieldError('password', 'Required field cannot be empty.');
 				valid = false;
 			}
 
 			if (form.metadataSource === 'custom' && !form.customMetadataQuery) {
-				showFieldError(
-					'customMetadataQuery',
-					'Required field cannot be empty.'
-				);
+				showFieldError('customMetadataQuery', 'Required field cannot be empty.');
 				valid = false;
 			}
 
-			// document.getElementById('formError').classList.add('hidden');
-			return true;
-		}
-
-		function updateMetadataSourceDisplay() {
-			const source = document.getElementById('metadataSource').value;
-			const block = document.getElementById('customQueryBlock');
-
-			if (source === 'custom') {
-				block.classList.remove('hidden');
-			}
-			else {
-				block.classList.add('hidden');
-			}
+			return valid;
 		}
 
 		function setBusy(statusId, buttonId, isBusy) {
@@ -768,7 +847,8 @@ function getConnectionManagerHtml(
 
 			vscode.postMessage({
 				command: 'testConnection',
-				connection: readForm()
+				connection: readForm(),
+				password: readPassword()
 			});
 		});
 
@@ -781,33 +861,22 @@ function getConnectionManagerHtml(
 
 			vscode.postMessage({
 				command: 'testCustomMetadataQuery',
-				connection: readForm()
-			});
-		});
-
-		document.getElementById('testCustomQueryBtn').addEventListener('click', () => {
-			if (!validateForm()) {
-				return;
-			}
-
-			vscode.postMessage({
-				command: 'testCustomMetadataQuery',
-				connection: readForm()
+				connection: readForm(),
+				password: readPassword()
 			});
 		});
 
 		document.getElementById('metadataSource').addEventListener('change', () => {
 			updateMetadataSourceDisplay();
 		});
-		
+
 		document
-			.querySelectorAll('input, select')
+			.querySelectorAll('input, select, textarea')
 			.forEach(el => {
 				el.addEventListener('input', () => {
 					el.classList.remove('field-error');
 
-					const error =
-						document.getElementById(el.id + '-error');
+					const error = document.getElementById(el.id + '-error');
 
 					if (error) {
 						error.textContent = '';
@@ -844,7 +913,8 @@ function getConnectionManagerHtml(
 
 			vscode.postMessage({
 				command: 'makeActive',
-				connection: readForm()
+				connection: readForm(),
+				password: readPassword()
 			});
 		});
 
@@ -862,32 +932,8 @@ function getConnectionManagerHtml(
 
 			vscode.postMessage({
 				command: 'saveConnection',
-				connection: readForm()
-			});
-		});
-
-		document.getElementById('testBtn').addEventListener('click', () => {
-			if (!validateForm()) {
-				return;
-			}
-
-			vscode.postMessage({
-				command: 'testConnection',
-				connection: readForm()
-			});
-		});
-
-		document.getElementById('passwordBtn').addEventListener('click', () => {
-			const name = document.getElementById('name').value.trim();
-
-			if (!name) {
-				alert('Connection name is required before setting a password.');
-				return;
-			}
-
-			vscode.postMessage({
-				command: 'setPassword',
-				connectionName: name
+				connection: readForm(),
+				password: readPassword()
 			});
 		});
 
