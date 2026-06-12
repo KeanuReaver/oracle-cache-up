@@ -48,11 +48,13 @@ Advanced users may also enter custom metadata queries for environments that stor
 ## Getting Started
 
 1. Open any SQL file.
-2. Right-click and select OracleCacheUp → Manage Connections.
+2. Right-click and select **OracleCacheUp → Manage Connections**.
 3. Create a connection.
 4. Save a password.
 5. Refresh the metadata cache.
 6. Hover Oracle objects to view definitions.
+
+Alternatively, advanced users may populate the metadata cache manually without creating a database connection.
 
 ## Extension Settings
 
