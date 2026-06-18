@@ -2,6 +2,11 @@
 
 All notable changes to the "oracle-cache-up" extension will be documented in this file.
 
+## [1.1.1]
+
+### Changed
+- Added setting to hide/show table extensions if they exist instead of having them always show if they exist
+
 ## [1.1.0]
 
 ### Added

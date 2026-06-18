@@ -145,6 +145,11 @@
                     "default": false,
                     "description": "Infer likely PowerSchool relationships from ID/DCID field names. This is heuristic and may not always be accurate. (Only available for PowerSchool)"
                 },
+                "oracleCacheUp.tableExtendedBy": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Show tables that extend the current table at the top of the hover. (if any)"
+                },
                 "oracleCacheUp.hoverDelayMs": {
                     "type": "number",
                     "default": 0,

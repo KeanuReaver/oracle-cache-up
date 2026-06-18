@@ -88,3 +88,7 @@ Lowered the minimum supported VS Code version from `1.120.0` to `1.85.0`.
 - Fixed passwords not deleting
 - Added viewable inferred table relationships for PowerSchool
 - Added simulated customizable delay for hover
+
+### 1.1.1
+
+Added setting to show/hide table extensions rather than have them always shown if they existed.

@@ -187,6 +187,7 @@ function showTableHover(
 ): vscode.Hover | undefined {
 	const table = cache[tableName];
 	const inferData = vscode.workspace.getConfiguration('oracleCacheUp').get<boolean>('inferPowerSchoolRelationships');
+	const extBy = vscode.workspace.getConfiguration('oracleCacheUp').get<boolean>('tableExtendedBy');
 
 	if (!table) {
 		return new vscode.Hover(`Table/Object: ${tableName}\n\nNo cached metadata found.`);
@@ -200,7 +201,7 @@ function showTableHover(
 		md.appendMarkdown(`${table._table.description}\n\n`);
 	}
 
-	if (Array.isArray(extendedBy) && extendedBy.length > 0) {
+	if (extBy && Array.isArray(extendedBy) && extendedBy.length > 0) {
 		md.appendMarkdown(
 			`**Extended by:** ${extendedBy.join(', ')}\n\n`
 		);
