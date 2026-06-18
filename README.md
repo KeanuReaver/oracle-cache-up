@@ -16,6 +16,7 @@ Unlike the original implementation, OracleCacheUp also understands:
 - Inline views
 - Derived CASE expressions
 - Custom metadata sources
+- Table relationships
 
 ## Features
 
@@ -29,6 +30,7 @@ Unlike the original implementation, OracleCacheUp also understands:
 - Multiple saved Oracle connections
 - Secure password storage using VS Code SecretStorage
 - Generic Oracle, PowerSchool, and Custom metadata sources
+- Powerschool inferred table relationships
 
 ![Hover Definitions](images/hoverEffect_small.gif)
 
@@ -63,6 +65,7 @@ This extension contributes the following settings:
 * `oracleCacheUp.connections`: Array of saved connections
 * `oracleCacheUp.activeConnection`: Currently active/default connection
 * `oracleCacheUp.showDescriptions`: Show/Hide table and field descriptions in the hover data (if available)
+* `oracleCacheUp.inferPowerSchoolRelationships`: Show/Hide inferred table relationships
 
 ## Known Issues
 
@@ -73,3 +76,11 @@ Very large metadata caches (100MB+) may increase memory usage and impact hover p
 ### 1.0.0
 
 Initial Release.
+
+### 1.0.1
+
+Lowered the minimum supported VS Code version from `1.120.0` to `1.85.0`.
+
+### 1.1.0
+
+Improved query logic and added viewable inferred table relationships for PowerSchool

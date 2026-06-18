@@ -141,14 +141,23 @@ export function registerHoverControlCommands(context: vscode.ExtensionContext): 
 	const restartHoverCommand = vscode.commands.registerCommand(
 		'oracle-cache-up.restartHover',
 		async () => {
-			hoverPaused = false;
-			loadCache();
-			await vscode.commands.executeCommand(
-				'setContext',
-				'oracleCacheUp.hoverPaused',
-				false
-			);
-			vscode.window.showInformationMessage('OracleCacheUp hovers restarted.');
+			try {
+				hoverPaused = false;
+				loadCache();
+
+				await vscode.commands.executeCommand(
+					'setContext',
+					'oracleCacheUp.hoverPaused',
+					false
+				);
+
+				vscode.window.showInformationMessage('OracleCacheUp local cache reloaded.');
+			}
+			catch (err: any) {
+				vscode.window.showErrorMessage(
+					`OracleCacheUp reload failed: ${err.message ?? err}`
+				);
+			}
 		}
 	);
 
@@ -163,29 +172,50 @@ function showTableHover(
     showDescriptions: boolean
 ): vscode.Hover | undefined {
 	const table = cache[tableName];
+	const inferData = vscode.workspace.getConfiguration('oracleCacheUp').get<boolean>('inferPowerSchoolRelationships');
 
 	if (!table) {
 		return new vscode.Hover(`Table/Object: ${tableName}\n\nNo cached metadata found.`);
 	}
 
 	const md = new vscode.MarkdownString();
+	const extendedBy = table._table?.extended_by;
+
 	md.appendMarkdown(`### ${tableName}\n\n`);
 	if (showDescriptions && table._table?.description) {
 		md.appendMarkdown(`${table._table.description}\n\n`);
 	}
-	md.appendMarkdown(`| Field | Type |\n`);
-	md.appendMarkdown(`|---|---|\n`);
+	if (Array.isArray(extendedBy) && extendedBy.length > 0) {
+		md.appendMarkdown(
+			`**Extended by:** ${extendedBy.join(', ')}\n\n`
+		);
+	}
 
+	if (inferData ) {
+		md.appendMarkdown(`| Field | Type | Relationship |\n|---|---|---|\n`);
+	} else {
+		md.appendMarkdown(`| Field | Type |\n|---|---|\n`);
+	}	
+	
 	for (const [fieldName, fieldInfo] of Object.entries(table)) {
 		if (fieldName === '_table') {
 			continue;
 		}
 
 		const info = fieldInfo as any;
+		const relationship = getFieldRelationshipLabel(info);
 
-		md.appendMarkdown(
-			`| ${fieldName} | ${info.field_data_type ?? ''} |\n`
-		);
+		
+		if (inferData ) {
+			md.appendMarkdown(
+				`| ${fieldName} | ${info.field_data_type ?? ''} | ${relationship} |\n`
+			);
+		} else {
+			md.appendMarkdown(
+				`| ${fieldName} | ${info.field_data_type ?? ''} |\n`
+			);
+		}
+			
 	}
 
 	return new vscode.Hover(md);
@@ -206,10 +236,18 @@ function showFieldHover(
 	}
 
 	const md = new vscode.MarkdownString();
-	md.appendMarkdown(`### ${tableName}.${fieldName}\n\n`);
-	md.appendMarkdown(`**Type:** ${fieldInfo.field_data_type ?? ''}`);
+	md.appendMarkdown(`### ${tableName}.${fieldName}\n\n**Type:** ${fieldInfo.field_data_type ?? ''}`);
 	if (showDescriptions && fieldInfo.description) {
 		md.appendMarkdown(`\n\n${fieldInfo.description}`);
+	}
+	if (fieldInfo.relationship_table && fieldInfo.relationship_column) {
+		md.appendMarkdown(
+			`\n\n**PowerSchool Relationship:** ${fieldInfo.relationship_table}.${fieldInfo.relationship_column}`
+		);
+
+		if (fieldInfo.relationship_source === 'powerschool-inferred') {
+			md.appendMarkdown(`  \n_Inferred from field name._`);
+		}
 	}
 
 	return new vscode.Hover(md);
@@ -247,9 +285,7 @@ function showCteHover(
 ): vscode.Hover {
     const md = new vscode.MarkdownString();
 
-    md.appendMarkdown(`### CTE: ${cte.name}\n\n`);
-    md.appendMarkdown(`| Field | Source | Type |\n`);
-    md.appendMarkdown(`|---|---|---|\n`);
+    md.appendMarkdown(`### CTE: ${cte.name}\n\n| Field | Source | Type |\n|---|---|---|\n`);
 
     for (const [fieldName, source] of Object.entries(cte.fields)) {
         const datatype = getDatatypeFromSource(source, cache, ctes) ?? 'Derived expression';
@@ -280,8 +316,7 @@ function showCteFieldHover(
 
     const md = new vscode.MarkdownString();
 
-    md.appendMarkdown(`### ${cte.name}.${fieldName}\n\n`);
-    md.appendMarkdown(`**Derived from:** \`${tableCell(source)}\`  \n`);
+    md.appendMarkdown(`### ${cte.name}.${fieldName}\n\n**Derived from:** \`${tableCell(source)}\`  \n`);
 
     if (datatype) {
         md.appendMarkdown(`**Type:** ${datatype}`);
@@ -313,12 +348,33 @@ function showGlobalFieldHover(fieldName: string, cache: any): vscode.Hover | und
 	}
 
 	const md = new vscode.MarkdownString();
-	md.appendMarkdown(`### ${fieldName}\n\n`);
-	md.appendMarkdown(`| Field | Type |\n`);
-	md.appendMarkdown(`|---|---|\n`);
-	md.appendMarkdown(matches.join('\n'));
+	md.appendMarkdown(`### ${fieldName}\n\n| Field | Type |\n|---|---|\n${matches.join('\n')}`);
 
 	return new vscode.Hover(md);
+}
+
+function getFieldRelationshipLabel(fieldInfo: any): string {
+    if (fieldInfo.parent_table) {
+        const parentIndex = fieldInfo.parent_table_index
+            ? `.${fieldInfo.parent_table_index}`
+            : '';
+
+        return `PowerSchool → ${fieldInfo.parent_table}${parentIndex}`;
+    }
+
+    if (fieldInfo.relationship_table && fieldInfo.relationship_column) {
+        return `Inferred → ${fieldInfo.relationship_table}.${fieldInfo.relationship_column}`;
+    }
+
+    if (fieldInfo.foreign_table && fieldInfo.foreign_column) {
+        return `FK → ${fieldInfo.foreign_table}.${fieldInfo.foreign_column}`;
+    }
+
+    if (fieldInfo.is_primary_key) {
+        return 'PK';
+    }
+
+    return '';
 }
 
 function getCurrentStatement(document: vscode.TextDocument, position: vscode.Position): string {

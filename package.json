@@ -139,6 +139,11 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Show table and field comments/descriptions in hovers when available."
+                },
+                "oracleCacheUp.inferPowerSchoolRelationships": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Infer likely PowerSchool relationships from ID/DCID field names. This is heuristic and may not always be accurate. (Only available for PowerSchool)"
                 }
             }
         },

@@ -2,6 +2,11 @@
 
 All notable changes to the "oracle-cache-up" extension will be documented in this file.
 
+## [1.1.0]
+
+- Improved query logic.
+- added viewable inferred table relationships for PowerSchool.
+
 ## [1.0.1]
 
 ### Changed
