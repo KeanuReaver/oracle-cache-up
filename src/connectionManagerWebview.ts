@@ -9,7 +9,7 @@ import {
 	testOracleConnection,
 	validateConnection
 } from './connections';
-import { testCustomMetadataQuery } from './cacheRefresh';
+import { refreshCache, testCustomMetadataQuery } from './cacheRefresh';
 import { OracleConnection } from './types';
 
 const SAVED_PASSWORD_PLACEHOLDER = '********';
@@ -30,178 +30,134 @@ export function registerManageConnectionsCommand(context: vscode.ExtensionContex
 			await renderConnectionManager(panel, context);
 
 			panel.webview.onDidReceiveMessage(async message => {
-				if (message.command === 'testCustomMetadataQuery') {
-					const connectionInfo = message.connection as OracleConnection;
-
-					try {
-						const password = cleanPassword(message.password);
-
-						if (password) {
-							await context.secrets.store(
-								getPasswordKey(connectionInfo.name),
-								password
+				switch (message.command) {
+					case 'testCustomMetadataQuery':	{
+						const connectionInfo = message.connection as OracleConnection;
+						try {
+							await applyPasswordChange(context, connectionInfo.name, message.passwordChange);
+							await testCustomMetadataQuery(context, connectionInfo);
+							vscode.window.showInformationMessage('Custom metadata query returned the required fields.');
+						} catch (error: unknown) {
+							const errMsg = error instanceof Error ? error.message : String(error);
+							vscode.window.showErrorMessage(
+								`Custom metadata query failed: ${errMsg}`
 							);
+						} finally {
+							panel.webview.postMessage({
+								command: `testCustomMetadataQueryFinished`
+							});
+						}
+						break;
+					}	
+					case 'makeActive': {
+						const connectionInfo = message.connection as OracleConnection;
+						if (!connectionInfo?.name) {
+							vscode.window.showErrorMessage('choose a connection before connnecting.');
+							return;
 						}
 
-						await testCustomMetadataQuery(context, connectionInfo);
-
-						vscode.window.showInformationMessage(
-							'Custom metadata query returned the required fields.'
-						);
-					}
-					catch (err: any) {
-						vscode.window.showErrorMessage(
-							`Custom metadata query failed: ${err.message}`
-						);
-					}
-					finally {
-						panel.webview.postMessage({
-							command: 'testCustomMetadataQueryFinished'
-						});
-					}
-				}
-
-				if (message.command === 'makeActive') {
-					const connection = message.connection as OracleConnection;
-
-					if (!connection?.name) {
-						vscode.window.showErrorMessage('Choose a connection before connecting.');
-						return;
-					}
-
-					const errors = validateConnection(connection);
-
-					if (errors.length > 0) {
-						vscode.window.showErrorMessage(`Connection is missing: ${errors.join(', ')}`);
-						return;
-					}
-
-					await upsertConnection(connection);
-
-					const password = cleanPassword(message.password);
-
-					if (password) {
-						await context.secrets.store(
-							getPasswordKey(connection.name),
-							password
-						);
-					}
-
-					await setActiveConnection(connection.name);
-					await renderConnectionManager(panel, context, connection.name);
-
-					vscode.window.showInformationMessage(`Active connection set to "${connection.name}".`);
-				}
-
-				if (message.command === 'testConnection') {
-					const testConnection = message.connection as OracleConnection;
-
-					const errors = validateConnection(testConnection);
-
-					if (errors.length > 0) {
-						vscode.window.showErrorMessage(`Connection is missing: ${errors.join(', ')}`);
-						return;
-					}
-
-					try {
-						const password = cleanPassword(message.password);
-
-						if (password) {
-							await context.secrets.store(
-								getPasswordKey(testConnection.name),
-								password
-							);
+						const errors = validateConnection(connectionInfo);
+						if (errors.length > 0) {
+							vscode.window.showErrorMessage(`Connection is missing: ${errors.join(', ')}`);
+							return;
 						}
 
-						const resultRows = await testOracleConnection(
-							context,
-							testConnection
+						await upsertConnection(connectionInfo);
+						await applyPasswordChange(context, connectionInfo.name, message.passwordChange);
+						await setActiveConnection(connectionInfo.name);
+						await renderConnectionManager(panel, context, connectionInfo.name);
+
+						vscode.window.showInformationMessage(`Active connection set to "${connectionInfo.name}".`);
+						break;
+					}	
+					case 'testConnection': {
+						const connectionInfo = message.connection as OracleConnection;
+						const errors = validateConnection(connectionInfo);
+						if (errors.length > 0) {
+							vscode.window.showErrorMessage(`Connection is missing: ${errors.join(', ')}`);
+							return;
+						}
+
+						try {
+							await applyPasswordChange(context, connectionInfo.name, message.passwordChange);
+							const resultRows = await testOracleConnection(context, connectionInfo);
+
+							vscode.window.showInformationMessage(`Connection successful: ${JSON.stringify(resultRows)}`);
+						} catch (error: unknown) {
+							const errMsg = error instanceof Error ? error.message : String(error);
+							vscode.window.showErrorMessage(`Connection failed: ${errMsg}`);
+						} finally {
+							panel.webview.postMessage({ command: 'testConnectionFinished'});
+						}
+						break;
+					}	
+					case 'deleteConnection': {
+						const connectionName = message.connectionName as string;
+						if (!connectionName) {
+							vscode.window.showErrorMessage('No connection selected.');
+							return;
+						}
+
+						const confirm = await vscode.window.showWarningMessage(
+							`Delete connection "${connectionName}"?`,
+							{ modal: true },
+							'Delete'
 						);
 
-						vscode.window.showInformationMessage(
-							`Connection successful: ${JSON.stringify(resultRows)}`
-						);
-					}
-					catch (err: any) {
-						vscode.window.showErrorMessage(`Connection failed: ${err.message}`);
-					}
-					finally {
-						panel.webview.postMessage({
-							command: 'testConnectionFinished'
-						});
-					}
-				}
+						if (confirm !== 'Delete') {
+							return;
+						}
 
-				if (message.command === 'deleteConnection') {
-					const connectionName = message.connectionName as string;
+						const connections = getConnections();
+						const updateConnections = connections.filter(c => c.name !== connectionName);
 
-					if (!connectionName) {
-						vscode.window.showErrorMessage('No connection selected.');
-						return;
-					}
+						await saveConnections(updateConnections);
+						await context.secrets.delete(getPasswordKey(connectionName));
 
-					const confirm = await vscode.window.showWarningMessage(
-						`Delete connection "${connectionName}"?`,
-						{ modal: true },
-						'Delete'
-					);
+						const config = vscode.workspace.getConfiguration('oracleCacheUp');
+						const activeConnectionName = config.get<string>('activeConnection') ?? '';
 
-					if (confirm !== 'Delete') {
-						return;
-					}
-
-					const connections = getConnections();
-
-					const updatedConnections = connections.filter(
-						c => c.name !== connectionName
-					);
-
-					await saveConnections(updatedConnections);
-
-					await context.secrets.delete(
-						getPasswordKey(connectionName)
-					);
-
-					const config = vscode.workspace.getConfiguration('oracleCacheUp');
-					const activeConnectionName = config.get<string>('activeConnection') ?? '';
-
-					const newActiveConnectionName =
-						activeConnectionName === connectionName
-							? updatedConnections[0]?.name ?? ''
+						const newActiveConnectionName = activeConnectionName === connectionName
+							? updateConnections[0]?.name ?? ''
 							: activeConnectionName;
 
-					await setActiveConnection(newActiveConnectionName);
+						await setActiveConnection(newActiveConnectionName);
+						await renderConnectionManager(panel, context, '');
 
-					await renderConnectionManager(panel, context, '');
+						vscode.window.showInformationMessage(`Connection "${connectionName}" deleted.`);
+						break;
+					}	
+					case 'saveConnection': {
+						const connectionInfo = message.connection as OracleConnection;
+						const errors = validateConnection(connectionInfo);
+						if (errors.length > 0) {
+							vscode.window.showErrorMessage(`Connection is missing: ${errors.join(', ')}`);
+							return;
+						}
 
-					vscode.window.showInformationMessage(`Connection "${connectionName}" deleted.`);
-				}
+						await upsertConnection(connectionInfo);
+						await applyPasswordChange(context, connectionInfo.name, message.passwordChange);
+						await setActiveConnection(connectionInfo.name);
+						await renderConnectionManager(panel, context, connectionInfo.name);
 
-				if (message.command === 'saveConnection') {
-					const savedConnection = message.connection as OracleConnection;
-
-					const errors = validateConnection(savedConnection);
-
-					if (errors.length > 0) {
-						vscode.window.showErrorMessage(`Connection is missing: ${errors.join(', ')}`);
-						return;
+						vscode.window.showInformationMessage('Connection saved.');
+						break;
 					}
-
-					await upsertConnection(savedConnection);
-
-					const password = cleanPassword(message.password);
-
-					if (password) {
-						await context.secrets.store(
-							getPasswordKey(savedConnection.name),
-							password
-						);
+					case 'refreshCache': {
+						try {
+							const connectionInfo = message.connection as OracleConnection;
+							await upsertConnection(connectionInfo);
+							await applyPasswordChange(context, connectionInfo.name, message.passwordChange);
+							await setActiveConnection(connectionInfo.name);
+							await refreshCache(context);
+						} catch (error: unknown) {
+							const errMsg = error instanceof Error ? error.message : String(error);
+							vscode.window.showErrorMessage(`Refresh failed: ${errMsg}`);
+						} finally {
+							panel.webview.postMessage({ command: 'refreshCacheFinished' });
+						}
+						break;
 					}
-
-					await setActiveConnection(savedConnection.name);
-					await renderConnectionManager(panel, context, savedConnection.name);
-
-					vscode.window.showInformationMessage('Connection saved.');
 				}
 			});
 		}
@@ -233,8 +189,7 @@ async function upsertConnection(connection: OracleConnection): Promise<void> {
 
 	if (existingIndex >= 0) {
 		connections[existingIndex] = connection;
-	}
-	else {
+	} else {
 		connections.push(connection);
 	}
 
@@ -257,6 +212,28 @@ async function renderConnectionManager(
 		passwordStatuses,
 		selectedConnectionName
 	);
+}
+
+async function applyPasswordChange(
+    context: vscode.ExtensionContext,
+    connectionName: string,
+    passwordChange: { action: string; value: string } | undefined
+): Promise<void> {
+    if (!passwordChange) {
+        return;
+    }
+
+    if (passwordChange.action === 'clear') {
+        await context.secrets.delete(getPasswordKey(connectionName));
+        return;
+    }
+
+    if (passwordChange.action === 'set') {
+        await context.secrets.store(
+            getPasswordKey(connectionName),
+            passwordChange.value
+        );
+    }
 }
 
 function getConnectionManagerHtml(
@@ -582,7 +559,10 @@ function getConnectionManagerHtml(
 
 				<div class="button-group">
 					<button id="deleteBtn" class="danger">Delete</button>
-					<button id="connectBtn" class="secondary">Connect</button>
+					<button id="connectBtn" class="secondary">Make Active</button>
+					<button id="rebuildBtn" class="secondary">Rebuild Cache</button>
+					<span id="rebuildStatus" class="inline-status hidden">Rebuilding...</span>
+					
 					<button id="saveBtn">Save</button>
 				</div>
 			</div>
@@ -596,11 +576,11 @@ function getConnectionManagerHtml(
 	<script>
 		const vscode = acquireVsCodeApi();
 		const SAVED_PASSWORD_PLACEHOLDER = ${passwordPlaceholderJson};
+		const connections = ${connectionJson};
+		const activeConnectionName = ${activeJson};
+		const passwordStatuses = ${passwordStatusJson};
 
-		let connections = ${connectionJson};
-		let activeConnectionName = ${activeJson};
 		let selectedName = ${selectedJson};
-		let passwordStatuses = ${passwordStatusJson};
 
 		function clearValidation() {
 			document
@@ -678,8 +658,7 @@ function getConnectionManagerHtml(
 			if (type === 'sid') {
 				label.textContent = 'SID';
 				input.value = input.dataset.sid || '';
-			}
-			else {
+			} else {
 				label.textContent = 'Service Name';
 				input.value = input.dataset.serviceName || '';
 			}
@@ -690,8 +669,7 @@ function getConnectionManagerHtml(
 
 			if (conn && conn.name) {
 				title.textContent = 'Update Connection: ' + conn.name;
-			}
-			else {
+			} else {
 				title.textContent = 'New Connection';
 			}
 		}
@@ -702,8 +680,7 @@ function getConnectionManagerHtml(
 
 			if (source === 'custom') {
 				block.classList.remove('hidden');
-			}
-			else {
+			} else {
 				block.classList.add('hidden');
 			}
 		}
@@ -741,14 +718,27 @@ function getConnectionManagerHtml(
 			updateMetadataSourceDisplay();
 		}
 
-		function readPassword() {
+		function readPasswordChange() {
 			const value = document.getElementById('password').value;
 
 			if (value === SAVED_PASSWORD_PLACEHOLDER) {
-				return '';
+				return {
+					action: 'unchanged',
+					value: ''
+				};
 			}
 
-			return value;
+			if (!value.trim()) {
+				return {
+					action: 'clear',
+					value: ''
+				};
+			}
+
+			return {
+				action: 'set',
+				value
+			};
 		}
 
 		function readForm() {
@@ -757,8 +747,7 @@ function getConnectionManagerHtml(
 
 			if (type === 'sid') {
 				dbEl.dataset.sid = dbEl.value.trim();
-			}
-			else {
+			} else {
 				dbEl.dataset.serviceName = dbEl.value.trim();
 			}
 
@@ -815,12 +804,7 @@ function getConnectionManagerHtml(
 			if (form.connectionType === 'sid' && !form.sid) {
 				showFieldError('databaseValue', 'Required field cannot be empty.');
 				valid = false;
-			}
-
-			if (!hasSavedPassword(form.name) && !readPassword()) {
-				showFieldError('password', 'Required field cannot be empty.');
-				valid = false;
-			}
+			}		
 
 			if (form.metadataSource === 'custom' && !form.customMetadataQuery) {
 				showFieldError('customMetadataQuery', 'Required field cannot be empty.');
@@ -838,40 +822,7 @@ function getConnectionManagerHtml(
 			button.disabled = isBusy;
 		}
 
-		document.getElementById('testBtn').addEventListener('click', () => {
-			if (!validateForm()) {
-				return;
-			}
-
-			setBusy('testStatus', 'testBtn', true);
-
-			vscode.postMessage({
-				command: 'testConnection',
-				connection: readForm(),
-				password: readPassword()
-			});
-		});
-
-		document.getElementById('testCustomQueryBtn').addEventListener('click', () => {
-			if (!validateForm()) {
-				return;
-			}
-
-			setBusy('testCustomQueryStatus', 'testCustomQueryBtn', true);
-
-			vscode.postMessage({
-				command: 'testCustomMetadataQuery',
-				connection: readForm(),
-				password: readPassword()
-			});
-		});
-
-		document.getElementById('metadataSource').addEventListener('change', () => {
-			updateMetadataSourceDisplay();
-		});
-
-		document
-			.querySelectorAll('input, select, textarea')
+		document.querySelectorAll('input, select, textarea')
 			.forEach(el => {
 				el.addEventListener('input', () => {
 					el.classList.remove('field-error');
@@ -885,14 +836,45 @@ function getConnectionManagerHtml(
 				});
 			});
 
+		document.getElementById('testBtn').addEventListener('click', () => {
+			if (!validateForm()) {
+				return;
+			}
+
+			setBusy('testStatus', 'testBtn', true);
+
+			vscode.postMessage({
+				command: 'testConnection',
+				connection: readForm(),
+				passwordChange: readPasswordChange()
+			});
+		});
+
+		document.getElementById('testCustomQueryBtn').addEventListener('click', () => {
+			if (!validateForm()) {
+				return;
+			}
+
+			setBusy('testCustomQueryStatus', 'testCustomQueryBtn', true);
+
+			vscode.postMessage({
+				command: 'testCustomMetadataQuery',
+				connection: readForm(),
+				passwordChange: readPasswordChange()
+			});
+		});
+
+		document.getElementById('metadataSource').addEventListener('change', () => {
+			updateMetadataSourceDisplay();
+		});
+
 		document.getElementById('connectionType').addEventListener('change', () => {
 			const dbEl = document.getElementById('databaseValue');
 			const type = document.getElementById('connectionType').value;
 
 			if (type === 'sid') {
 				dbEl.dataset.serviceName = dbEl.dataset.serviceName || '';
-			}
-			else {
+			} else {
 				dbEl.dataset.sid = dbEl.dataset.sid || '';
 			}
 
@@ -914,7 +896,21 @@ function getConnectionManagerHtml(
 			vscode.postMessage({
 				command: 'makeActive',
 				connection: readForm(),
-				password: readPassword()
+				passwordChange: readPasswordChange()
+			});
+		});
+
+		document.getElementById('rebuildBtn').addEventListener('click', () => {
+			if (!validateForm()) {
+				return;
+			}
+
+			setBusy('rebuildStatus', 'rebuildBtn', true);
+
+			vscode.postMessage({
+				command: 'refreshCache',
+				connection: readForm(),
+				passwordChange: readPasswordChange()
 			});
 		});
 
@@ -933,7 +929,7 @@ function getConnectionManagerHtml(
 			vscode.postMessage({
 				command: 'saveConnection',
 				connection: readForm(),
-				password: readPassword()
+				passwordChange: readPasswordChange()
 			});
 		});
 
@@ -954,6 +950,10 @@ function getConnectionManagerHtml(
 			if (message.command === 'testCustomMetadataQueryFinished') {
 				setBusy('testCustomQueryStatus', 'testCustomQueryBtn', false);
 			}
+
+			if (message.command === 'refreshCacheFinished') {
+				setBusy('rebuildStatus', 'rebuildBtn', false);
+			}
 		});
 
 		const initial = connections.find(c => c.name === selectedName);
@@ -961,8 +961,7 @@ function getConnectionManagerHtml(
 		if (initial) {
 			fillForm(initial);
 			showForm();
-		}
-		else {
+		} else {
 			hideForm();
 		}
 

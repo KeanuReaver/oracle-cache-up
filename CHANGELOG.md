@@ -4,8 +4,13 @@ All notable changes to the "oracle-cache-up" extension will be documented in thi
 
 ## [1.1.0]
 
-- Improved query logic.
-- added viewable inferred table relationships for PowerSchool.
+### Added
+- Viewable inferred table relationships for PowerSchool
+- Simulated customizable delay for hover
+
+### Changed
+- Query logic for improved consistency
+- Fixed passwords not deleting
 
 ## [1.0.1]
 

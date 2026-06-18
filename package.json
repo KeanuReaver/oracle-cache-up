@@ -144,6 +144,13 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Infer likely PowerSchool relationships from ID/DCID field names. This is heuristic and may not always be accurate. (Only available for PowerSchool)"
+                },
+                "oracleCacheUp.hoverDelayMs": {
+                    "type": "number",
+                    "default": 0,
+                    "minimum": 0,
+                    "maximum": 500,
+                    "description": "Delay before showing OracleCacheUp hovers, in milliseconds. Helps if you think the hovers are too responsive."
                 }
             }
         },
@@ -180,7 +187,7 @@
     },
     "devDependencies": {
         "@types/mocha": "^10.0.10",
-        "@types/node": "22.x",
+        "@types/node": "^22.19.21",
         "@types/vscode": "^1.85.0",
         "@vscode/test-cli": "^0.0.12",
         "@vscode/test-electron": "^2.5.2",

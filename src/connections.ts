@@ -139,8 +139,7 @@ export async function testOracleConnection(
 		);
 
 		return result.rows;
-	}
-	finally {
+	} finally {
 		if (connection) {
 			await connection.close();
 		}
@@ -235,11 +234,9 @@ export function registerTestConnectionCommand(context: vscode.ExtensionContext):
 				vscode.window.showInformationMessage(
 					`Connection successful: ${JSON.stringify(resultRows)}`
 				);
-			}
-			catch (err: any) {
-				vscode.window.showErrorMessage(
-					err.message
-				);
+			} catch (error: unknown) {
+				const errMsg = error instanceof Error ? error.message : String(error);
+				vscode.window.showErrorMessage(errMsg);
 			}
 		}
 	);

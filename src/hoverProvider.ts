@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import { getCache, loadCache } from './cache';
 import { parseCtes, parseInlineViews, ParsedCte } from './cteParser';
+import { setTimeout as delayTimeout } from 'node:timers/promises';
 
 let hoverPaused = false;
 
@@ -9,13 +10,27 @@ export function registerHoverProvider(context: vscode.ExtensionContext): void {
 	const hoverProvider = vscode.languages.registerHoverProvider(
 		['sql', 'plsql', 'oracle-sql', 'oracle-plsql'],
 		{
-			provideHover(document, position) {
+			async provideHover(document, position) {
 				const showDescriptions =
 					vscode.workspace
 						.getConfiguration('oracleCacheUp')
 						.get<boolean>('showDescriptions') ?? false;
 				if (hoverPaused) {
 					return;
+				}
+
+				const rawHoverDelayMs =
+					vscode.workspace
+						.getConfiguration('oracleCacheUp')
+						.get<number>('hoverDelayMs') ?? 0;
+
+				const hoverDelayMs = Math.max(
+					0,
+					Math.min(500, rawHoverDelayMs)
+				);
+
+				if (hoverDelayMs > 0) {
+					await delayTimeout(hoverDelayMs);
 				}
 
 				const cache = getCache();
@@ -152,8 +167,7 @@ export function registerHoverControlCommands(context: vscode.ExtensionContext): 
 				);
 
 				vscode.window.showInformationMessage('OracleCacheUp local cache reloaded.');
-			}
-			catch (err: any) {
+			} catch (err: any) {
 				vscode.window.showErrorMessage(
 					`OracleCacheUp reload failed: ${err.message ?? err}`
 				);
@@ -185,6 +199,7 @@ function showTableHover(
 	if (showDescriptions && table._table?.description) {
 		md.appendMarkdown(`${table._table.description}\n\n`);
 	}
+
 	if (Array.isArray(extendedBy) && extendedBy.length > 0) {
 		md.appendMarkdown(
 			`**Extended by:** ${extendedBy.join(', ')}\n\n`
@@ -240,6 +255,7 @@ function showFieldHover(
 	if (showDescriptions && fieldInfo.description) {
 		md.appendMarkdown(`\n\n${fieldInfo.description}`);
 	}
+
 	if (fieldInfo.relationship_table && fieldInfo.relationship_column) {
 		md.appendMarkdown(
 			`\n\n**PowerSchool Relationship:** ${fieldInfo.relationship_table}.${fieldInfo.relationship_column}`
@@ -320,8 +336,7 @@ function showCteFieldHover(
 
     if (datatype) {
         md.appendMarkdown(`**Type:** ${datatype}`);
-    }
-    else {
+    } else {
         md.appendMarkdown(`**Type:** Derived expression`);
     }
 

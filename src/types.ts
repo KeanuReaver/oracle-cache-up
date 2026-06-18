@@ -17,12 +17,10 @@ export interface OracleConnection {
 export interface CachedField {
     field_data_type: string;
     description?: string;
-
     parent_table?: string;
     parent_table_index?: string;
     core_table?: string;
     is_core?: boolean;
-
     relationship_table?: string;
     relationship_column?: string;
     relationship_source?: 'powerschool-inferred';

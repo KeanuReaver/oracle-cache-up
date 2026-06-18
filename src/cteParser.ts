@@ -5,7 +5,6 @@ export interface ParsedCte {
 
 export function parseCtes(sql: string): Record<string, ParsedCte> {
     const ctes: Record<string, ParsedCte> = {};
-
     const withIndex = sql.search(/\bWITH\b/i);
 
     if (withIndex < 0) {
@@ -46,8 +45,8 @@ export function parseCtes(sql: string): Record<string, ParsedCte> {
 
 export function parseInlineViews(sql: string): Record<string, ParsedCte> {
     const views: Record<string, ParsedCte> = {};
-
     const regex = /\b(FROM|JOIN)\s*\(/gi;
+
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(sql)) !== null) {
@@ -102,8 +101,7 @@ function findMatchingParen(sql: string, openParenIndex: number): number {
 
         if (char === '(') {
             depth++;
-        }
-        else if (char === ')') {
+        } else if (char === ')') {
             depth--;
 
             if (depth === 0) {
@@ -117,7 +115,6 @@ function findMatchingParen(sql: string, openParenIndex: number): number {
 
 function parseSelectFields(sql: string): Record<string, string> {
     const fields: Record<string, string> = {};
-
     const selectMatch = sql.match(/\bSELECT\b/i);
     const fromMatch = sql.match(/\bFROM\b/i);
 
@@ -151,16 +148,14 @@ function splitTopLevelCommas(text: string): string[] {
     for (const char of text) {
         if (char === '(') {
             depth++;
-        }
-        else if (char === ')') {
+        } else if (char === ')') {
             depth--;
         }
 
         if (char === ',' && depth === 0) {
             parts.push(current.trim());
             current = '';
-        }
-        else {
+        } else {
             current += char;
         }
     }

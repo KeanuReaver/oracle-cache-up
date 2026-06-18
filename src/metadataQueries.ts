@@ -124,11 +124,11 @@ export function getMetadataQuery(connection: OracleConnection): string {
     }
 
     if (source === 'custom') {
-        if (!connection.customMetadataQuery?.trim()) {
+		const custQuery = connection.customMetadataQuery;
+        if (!custQuery?.trim()) {
             throw new Error('Custom metadata query is empty.');
         }
-
-        return connection.customMetadataQuery;
+        return custQuery;
     }
 
     return getGenericOracleMetadataQuery();

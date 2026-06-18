@@ -15,7 +15,68 @@ export function registerRefreshCacheCommand(context: vscode.ExtensionContext): v
 	);
 }
 
-async function refreshCache(context: vscode.ExtensionContext): Promise<void> {
+export async function testCustomMetadataQuery(
+    context: vscode.ExtensionContext,
+    connectionInfo: OracleConnection
+): Promise<void> {
+    const missingAliases = validateCustomMetadataQuery(connectionInfo.customMetadataQuery ?? '');
+    if (missingAliases.length > 0) {
+        throw new Error(
+            `Missing required aliases: ${missingAliases.join(', ')}`
+        );
+    }
+
+    const password = await context.secrets.get(getPasswordKey(connectionInfo.name));
+    if (!password) {
+        throw new Error(`No password saved for "${connectionInfo.name}".`);
+    }
+
+    let connection: oracledb.Connection | undefined;
+
+    try {
+        connection = await oracledb.getConnection({
+            user: connectionInfo.user,
+            password,
+            connectString: buildConnectString(connectionInfo)
+        });
+
+        const result = await connection.execute(
+            `
+                SELECT *
+                FROM (
+                    ${(connectionInfo.customMetadataQuery ?? '').trim().replace(/;$/, '')}
+                )
+                WHERE ROWNUM <= 1
+            `, 
+            {}, 
+            { outFormat: (oracledb as any).OUT_FORMAT_OBJECT }
+        );
+        
+        const row = result.rows?.[0];
+
+        if (!row) {
+            throw new Error('Query returned no rows.');
+        }
+
+        const required = ['TABLE_NAME', 'FIELD_NAME', 'FIELD_DATA_TYPE'];
+        const rowKeys = Object.keys(row).map(key => key.toUpperCase());
+        const missing = required.filter(
+            key => !rowKeys.includes(key)
+        );
+
+        if (missing.length > 0) {
+            throw new Error(
+                `Query result is missing required columns: ${missing.join(', ')}`
+            );
+        }
+    } finally {
+        if (connection) {
+            await connection.close();
+        }
+    }
+}
+
+export async function refreshCache(context: vscode.ExtensionContext): Promise<void> {
     let connection: oracledb.Connection | undefined;
 
     try {
@@ -56,30 +117,20 @@ async function refreshCache(context: vscode.ExtensionContext): Promise<void> {
         const rows = await getDictionary(activeConnection, connection);
         const newCache = buildMetadataCache(rows);
 
-        if (
-            activeConnection.metadataSource === 'powerschool' &&
-            vscode.workspace
-                .getConfiguration('oracleCacheUp')
-                .get<boolean>('inferPowerSchoolRelationships')
+        if (activeConnection.metadataSource === 'powerschool' 
+                    && vscode.workspace
+                            .getConfiguration('oracleCacheUp')
+                            .get<boolean>('inferPowerSchoolRelationships')
         ) {
             inferPowerSchoolRelationships(newCache);
         }
 
         saveCache(newCache);
-
         showCacheRefreshMessage(newCache);
-    }
-    catch (err: unknown) {
-        const message =
-            err instanceof Error
-                ? err.message
-                : String(err);
-
-        vscode.window.showErrorMessage(
-            `Cache refresh failed: ${message}`
-        );
-    }
-    finally {
+    } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        vscode.window.showErrorMessage(`Cache refresh failed: ${errMsg}`);
+    } finally {
         if (connection) {
             await connection.close();
         }
@@ -115,9 +166,7 @@ async function getDictionary(
     connection: oracledb.Connection
 ): Promise<any[]> {
     const metadataQuery = getMetadataQuery(activeConnection);
-
-    const binds =
-        activeConnection.metadataSource === 'custom'
+    const binds = activeConnection.metadataSource === 'custom'
             ? {}
             : {
                 owner: activeConnection.owner?.trim()
@@ -125,13 +174,7 @@ async function getDictionary(
                     : null
             };
 
-    const result = await connection.execute(
-        metadataQuery,
-        binds,
-        {
-            outFormat: (oracledb as any).OUT_FORMAT_OBJECT
-        }
-    );
+    const result = await connection.execute(metadataQuery, binds, { outFormat: (oracledb as any).OUT_FORMAT_OBJECT });
 
     return Array.isArray(result.rows)
         ? result.rows
@@ -146,15 +189,15 @@ function buildMetadataCache(rows: any[]) {
     }
 
 	for (const row of rows) {
-		const tableNameRaw = row.table_name ?? row.TABLE_NAME;
-		const fieldNameRaw = row.field_name ?? row.FIELD_NAME;
-		const fieldDataType = row.field_data_type ?? row.FIELD_DATA_TYPE;
-		const tableDesc = row.table_desc ?? row.TABLE_DESC;
-		const columnDesc = row.column_desc ?? row.COLUMN_DESC;
-		const parentTable = row.parent_table ?? row.PARENT_TABLE;
-		const parentTableIndex = row.parent_table_index ?? row.PARENT_TABLE_INDEX;
-		const coreTable = row.core_table ?? row.CORE_TABLE;
-		const isCore = row.is_core ?? row.IS_CORE;
+		const   tableNameRaw = row.table_name ?? row.TABLE_NAME,
+                fieldNameRaw = row.field_name ?? row.FIELD_NAME,
+                fieldDataType = row.field_data_type ?? row.FIELD_DATA_TYPE,
+                tableDesc = row.table_desc ?? row.TABLE_DESC,
+                columnDesc = row.column_desc ?? row.COLUMN_DESC,
+                parentTable = row.parent_table ?? row.PARENT_TABLE,
+                parentTableIndex = row.parent_table_index ?? row.PARENT_TABLE_INDEX,
+                coreTable = row.core_table ?? row.CORE_TABLE,
+                isCore = row.is_core ?? row.IS_CORE;
 
 		if (!tableNameRaw || !fieldNameRaw || !fieldDataType) {
 			continue;
@@ -186,77 +229,7 @@ function buildMetadataCache(rows: any[]) {
 	return sqlCache;
 }
 
-export async function testCustomMetadataQuery(
-    context: vscode.ExtensionContext,
-    connectionInfo: OracleConnection
-): Promise<void> {
-    const missingAliases = validateCustomMetadataQuery(connectionInfo.customMetadataQuery ?? '');
-    if (missingAliases.length > 0) {
-        throw new Error(
-            `Missing required aliases: ${missingAliases.join(', ')}`
-        );
-    }
 
-    const password = await context.secrets.get(getPasswordKey(connectionInfo.name));
-    if (!password) {
-        throw new Error(`No password saved for "${connectionInfo.name}".`);
-    }
-
-    let connection: oracledb.Connection | undefined;
-
-    try {
-        connection = await oracledb.getConnection({
-            user: connectionInfo.user,
-            password,
-            connectString: buildConnectString(connectionInfo)
-        });
-
-		const customQuery = (connectionInfo.customMetadataQuery ?? '')
-			.trim()
-			.replace(/;$/, '');
-
-        const testQuery = `
-            SELECT *
-            FROM (
-                ${customQuery}
-            )
-            WHERE ROWNUM <= 1
-        `;
-
-        const result = await connection.execute(
-            testQuery,
-            {},
-            {
-                outFormat: (oracledb as any).OUT_FORMAT_OBJECT
-            }
-        );
-
-        const row = result.rows?.[0];
-
-        if (!row) {
-            throw new Error('Query returned no rows.');
-        }
-
-        const required = ['TABLE_NAME', 'FIELD_NAME', 'FIELD_DATA_TYPE'];
-
-        const rowKeys = Object.keys(row).map(key => key.toUpperCase());
-
-        const missing = required.filter(
-            key => !rowKeys.includes(key)
-        );
-
-        if (missing.length > 0) {
-            throw new Error(
-                `Query result is missing required columns: ${missing.join(', ')}`
-            );
-        }
-    }
-    finally {
-        if (connection) {
-            await connection.close();
-        }
-    }
-}
 
 function inferPowerSchoolRelationships(newCache: OracleMetadataCache): void {
     const tableLookup = new Map<string, string>();
@@ -283,11 +256,7 @@ function inferPowerSchoolRelationships(newCache: OracleMetadataCache): void {
                 info.relationship_table ||
                 info.foreign_table;
 
-            if (
-                alreadyHasRelationship ||
-                name === 'ID' ||
-                name === 'DCID'
-            ) {
+            if (alreadyHasRelationship || name === 'ID' || name === 'DCID') {
                 continue;
             }
 
@@ -295,14 +264,11 @@ function inferPowerSchoolRelationships(newCache: OracleMetadataCache): void {
 
             if (name.endsWith('_DCID')) {
                 base = name.slice(0, -5);
-            }
-            else if (name.endsWith('DCID')) {
+            } else if (name.endsWith('DCID')) {
                 base = name.slice(0, -4);
-            }
-            else if (name.endsWith('_ID')) {
+            } else if (name.endsWith('_ID')) {
                 base = name.slice(0, -3);
-            }
-            else if (name.endsWith('ID')) {
+            } else if (name.endsWith('ID')) {
                 base = name.slice(0, -2);
             }
 
@@ -310,21 +276,15 @@ function inferPowerSchoolRelationships(newCache: OracleMetadataCache): void {
                 continue;
             }
 
-            const matched =
-                tableLookup.get(base) ??
-                tableLookup.get(`${base}S`);
+            const matched = tableLookup.get(base) ?? tableLookup.get(`${base}S`);
 
-            if (
-                matched &&
-                matched.toUpperCase() !== tableName.toUpperCase()
-            ) {
+            if (matched && matched.toUpperCase() !== tableName.toUpperCase()) {
                 info.relationship_table = matched;
                 info.relationship_source = 'powerschool-inferred';
 
                 if (name.endsWith('DCID')) {
                     info.relationship_column = 'DCID';
-                }
-                else {
+                } else {
                     info.relationship_column = 'ID';
                 }
             }

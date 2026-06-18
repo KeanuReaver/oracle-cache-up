@@ -66,6 +66,7 @@ This extension contributes the following settings:
 * `oracleCacheUp.activeConnection`: Currently active/default connection
 * `oracleCacheUp.showDescriptions`: Show/Hide table and field descriptions in the hover data (if available)
 * `oracleCacheUp.inferPowerSchoolRelationships`: Show/Hide inferred table relationships
+* `oracleCacheUp.hoverDelayMs`: Adds a delay for the hover to make it feel less responsive
 
 ## Known Issues
 
@@ -83,4 +84,7 @@ Lowered the minimum supported VS Code version from `1.120.0` to `1.85.0`.
 
 ### 1.1.0
 
-Improved query logic and added viewable inferred table relationships for PowerSchool
+- Improved query logic
+- Fixed passwords not deleting
+- Added viewable inferred table relationships for PowerSchool
+- Added simulated customizable delay for hover
